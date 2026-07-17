@@ -32,6 +32,7 @@
 #include "WavSink.h"
 #include "M4aSink.h"
 #include "MicCapture.h"
+#include "AudioMixer.h"
 
 static std::atomic<bool> g_bStopCapture(false);
 
@@ -42,6 +43,8 @@ struct CommandLineArgs {
 	int captureMode = 1;
 	std::wstring outputPath;
 	std::wstring format;  // 输出格式："m4a"（默认）或 "wav"
+	bool micEnabled = false;  // 是否混入麦克风
+	float micGain = 1.0f;     // 麦克风软件增益（1.0 = 原样）
 	bool isValid = false;
 	std::wstring errorMessage;
 };
@@ -111,6 +114,26 @@ CommandLineArgs ParseCommandLine(int argc, wchar_t* argv[]) {
 		}
 	}
 
+	// 麦克风混音开关与增益
+	if (params.find(L"mic") != params.end()) {
+		if (params[L"mic"] == L"on") {
+			args.micEnabled = true;
+		}
+		else if (params[L"mic"] != L"off") {
+			args.errorMessage = L"Error: Invalid --mic value: " + params[L"mic"] + L"\nMust be on or off.";
+			return args;
+		}
+	}
+	if (params.find(L"mic-gain") != params.end()) {
+		double gain = std::wcstod(params[L"mic-gain"].c_str(), &endPtr);
+		if (endPtr == params[L"mic-gain"].c_str() || *endPtr != L'\0' || gain < 0.1 || gain > 8.0) {
+			args.errorMessage = L"Error: Invalid --mic-gain: " + params[L"mic-gain"] +
+				L"\nMust be a number between 0.1 and 8.0 (1.0 = original volume).";
+			return args;
+		}
+		args.micGain = static_cast<float>(gain);
+	}
+
 	if (args.captureMode == 1 || args.captureMode == 2) {
 		if (params.find(L"pid") == params.end()) {
 			args.errorMessage = L"Error: Missing required argument --pid for mode 1 or 2.";
@@ -138,7 +161,9 @@ void usage() {
 		<< L"                 1 - Include mode: Capture target process and its children (default)\n"
 		<< L"                 2 - Exclude mode: Capture all except target process and its children\n"
 		<< L"  --path <PATH>  Output file path (required)\n"
-		<< L"  --format <F>   Output format: m4a (default, compressed) or wav (lossless)\n\n"
+		<< L"  --format <F>   Output format: m4a (default, compressed) or wav (lossless)\n"
+		<< L"  --mic <on|off> Mix your microphone into the recording (default off)\n"
+		<< L"  --mic-gain <G> Microphone volume boost, 0.1-8.0 (default 1.0, try 2 if too quiet)\n\n"
 		<< L"Examples:\n"
 		<< L"  ProcessAudioRecorder --mode 0 --path C:\\system_audio.wav\n"
 		<< L"  ProcessAudioRecorder --pid 1234 --mode 1 --path C:\\record.wav\n"
@@ -268,6 +293,27 @@ int wmain(int argc, wchar_t* argv[]) {
 	}
 	loopbackCapture.SetAudioSink(sink.get());
 	std::wcout << L"Output format: " << args.format << std::endl;
+
+	// 麦克风混音组装（声明顺序即析构安全顺序，勿调换）
+	AudioMixer mixer;
+	MicCapture mic;
+	if (args.micEnabled) {
+		mixer.SetMicGain(args.micGain);
+		// 环回块 → 混音 → 回送写入队列
+		loopbackCapture.SetDataTap([&mixer, &loopbackCapture](std::vector<BYTE>&& chunk) {
+			loopbackCapture.EnqueueAudioData(mixer.MixWithLoopback(std::move(chunk)));
+			});
+		HRESULT hrMic = mic.Initialize([&mixer](const BYTE* data, DWORD size) {
+			mixer.PushMicData(data, size);
+			});
+		if (FAILED(hrMic)) {
+			std::wcout << L"Error: microphone init failed. 0x" << std::hex << hrMic << L"\n"
+				<< L"Check: microphone connected? Privacy settings allow desktop apps?\n"
+				<< L"Or run without --mic on to record system audio only." << std::endl;
+			return 2;
+		}
+		std::wcout << L"Microphone mixing: ON (gain " << args.micGain << L"x)" << std::endl;
+	}
 	HRESULT hr;
 	if (args.captureMode == 0) {
 		std::wcout << L"Starting global audio capture (system mix)..." << std::endl;
@@ -294,6 +340,16 @@ int wmain(int argc, wchar_t* argv[]) {
 	}
 	if (!SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE)) {
 		std::wcout << L"Warning: Could not set control handler. Ctrl+C may not work properly." << std::endl;
+	}
+
+	// 环回捕获启动成功后再启动麦克风
+	if (args.micEnabled) {
+		HRESULT hrMicStart = mic.Start();
+		if (FAILED(hrMicStart)) {
+			std::wcout << L"Error: microphone start failed. 0x" << std::hex << hrMicStart << std::endl;
+			loopbackCapture.StopCaptureAsync();
+			return 2;
+		}
 	}
 	std::wcout << L"Capture started successfully." << std::endl;
 	std::wcout << L"Press Ctrl+C to stop capture at any time." << std::endl;
@@ -323,6 +379,11 @@ int wmain(int argc, wchar_t* argv[]) {
 	else if (processExited) {
 		std::wcout << L"Target process has exited. Stopping capture..." << std::endl;
 	}
+	// 先停麦克风再停环回，保证排空期间无新混音输入
+	if (args.micEnabled) {
+		mic.Stop();
+	}
+
 	// 停止捕获并检查结果（K7 修复：写盘失败要让用户知道）
 	HRESULT hrStop = loopbackCapture.StopCaptureAsync();
 	std::wcout << L"Finishing capture and saving file..." << std::endl;

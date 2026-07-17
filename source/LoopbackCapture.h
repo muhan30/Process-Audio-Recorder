@@ -49,6 +49,7 @@
 #include <mutex>             // 互斥锁
 #include <condition_variable> // 条件变量
 #include <atomic>            // 原子操作
+#include <functional>        // 回调函数对象
 
 using namespace Microsoft::WRL;  // 使用WRL命名空间
 
@@ -77,6 +78,12 @@ public:
 
  // 注入输出 Sink（须在 StartXXXCaptureAsync 之前调用，生命周期由调用方管理）
  void SetAudioSink(AudioSink* sink) { m_pSink = sink; }
+
+ // 数据分流回调：设置后捕获数据交给 tap 处理（混音），不再直接入写队列
+ void SetDataTap(std::function<void(std::vector<BYTE>&&)> tap) { m_dataTap = std::move(tap); }
+
+ // 把（混音后的）数据块送入写入队列（tap 处理完后回送用）
+ void EnqueueAudioData(std::vector<BYTE>&& chunk);
 
  // 使用宏生成异步回调实现
  METHODASYNCCALLBACK(CLoopbackCapture, StartCapture, OnStartCapture);
@@ -134,6 +141,7 @@ private:
  wil::unique_event_nothrow m_SampleReadyEvent;           // 样本就绪事件
  MFWORKITEM_KEY m_SampleReadyKey = 0;                    // Media Foundation工作项键
  AudioSink* m_pSink = nullptr;                           // 输出 Sink（不持有所有权）
+ std::function<void(std::vector<BYTE>&&)> m_dataTap;     // 数据分流回调（未设置则直接入队）
  wil::critical_section m_CritSec;                        // 临界区，用于同步
  DWORD m_dwQueueID = 0;                                  // 异步队列ID
 

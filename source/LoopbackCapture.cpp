@@ -397,6 +397,16 @@ HRESULT CLoopbackCapture::OnSampleReady(IMFAsyncResult* pResult)
 	return S_OK;
 }
 
+// 数据块入写入队列并唤醒写入线程
+void CLoopbackCapture::EnqueueAudioData(std::vector<BYTE>&& chunk)
+{
+	{
+		std::lock_guard<std::mutex> queueLock(m_QueueMutex);
+		m_AudioQueue.push(std::move(chunk));
+	}
+	m_QueueCV.notify_one();
+}
+
 // 处理音频样本请求
 HRESULT CLoopbackCapture::OnAudioSampleRequested()
 {
@@ -429,14 +439,15 @@ HRESULT CLoopbackCapture::OnAudioSampleRequested()
 			// 复制音频数据到向量
 			std::vector<BYTE> audioChunk(Data, Data + cbBytesToCapture);
 
-			// 将音频数据放入队列
+			// 设置了分流回调则交给它（混音路径），否则直接入写队列
+			if (m_dataTap)
 			{
-				std::lock_guard<std::mutex> queueLock(m_QueueMutex);
-				m_AudioQueue.push(std::move(audioChunk));
+				m_dataTap(std::move(audioChunk));
 			}
-
-			// 通知写入线程有新数据
-			m_QueueCV.notify_one();
+			else
+			{
+				EnqueueAudioData(std::move(audioChunk));
+			}
 		}
 		catch (const std::bad_alloc&)
 		{
