@@ -31,6 +31,7 @@
 #include "AudioSessionLister.h"
 #include "WavSink.h"
 #include "M4aSink.h"
+#include "MicCapture.h"
 
 static std::atomic<bool> g_bStopCapture(false);
 
@@ -215,6 +216,34 @@ int wmain(int argc, wchar_t* argv[]) {
 		}
 		std::wcout << L"\nTo record one of them:\n"
 			<< L"  ProcessAudioRecorder --pid <PID> --mode 1 --path D:\\rec.wav" << std::endl;
+		return 0;
+	}
+
+	// --mic-test：录 5 秒默认麦克风到 WAV，独立验证麦克风采集通路
+	if (argc >= 2 && wcscmp(argv[1], L"--mic-test") == 0) {
+		std::wcout << L"Mic test: recording 5 seconds from default microphone..." << std::endl;
+		WavSink sink;
+		MicCapture mic;
+		HRESULT hr = mic.Initialize([&sink](const BYTE* data, DWORD size) {
+			sink.WriteChunk(data, size);  // 单生产者，测试场景直接写
+			});
+		if (SUCCEEDED(hr)) {
+			hr = sink.Initialize(L"mic_test.wav", mic.Format());
+		}
+		if (SUCCEEDED(hr)) {
+			hr = mic.Start();
+		}
+		if (FAILED(hr)) {
+			std::wcout << L"Mic test FAILED. 0x" << std::hex << hr << L"\n"
+				<< L"Check: is a microphone connected?\n"
+				<< L"Check: Windows Settings > Privacy > Microphone > allow desktop apps." << std::endl;
+			return 2;
+		}
+		std::wcout << L"Speak now..." << std::endl;
+		std::this_thread::sleep_for(std::chrono::seconds(5));
+		mic.Stop();
+		sink.Finalize();
+		std::wcout << L"Saved to mic_test.wav (current directory). Play it to verify your voice." << std::endl;
 		return 0;
 	}
 
