@@ -52,6 +52,8 @@
 
 using namespace Microsoft::WRL;  // 使用WRL命名空间
 
+class AudioSink;  // 前向声明：音频输出接口（见 AudioSink.h）
+
 // CLoopbackCapture类声明
 // 继承自RuntimeClass（提供COM支持）、FtmBase（支持自由线程封送）和IActivateAudioInterfaceCompletionHandler（音频接口激活完成回调）
 class CLoopbackCapture :
@@ -72,6 +74,9 @@ public:
 
  // 停止音频捕获
  HRESULT StopCaptureAsync();
+
+ // 注入输出 Sink（须在 StartXXXCaptureAsync 之前调用，生命周期由调用方管理）
+ void SetAudioSink(AudioSink* sink) { m_pSink = sink; }
 
  // 使用宏生成异步回调实现
  METHODASYNCCALLBACK(CLoopbackCapture, StartCapture, OnStartCapture);
@@ -103,12 +108,6 @@ private:
  // 初始化环回捕获
  HRESULT InitializeLoopbackCapture();
 
- // 创建WAV文件并写入文件头
- HRESULT CreateWAVFile();
-
- // 修复WAV文件头（在捕获完成后写入正确的数据大小）
- HRESULT FixWAVHeader();
-
  // 处理音频样本请求
  HRESULT OnAudioSampleRequested();
 
@@ -134,11 +133,9 @@ private:
 
  wil::unique_event_nothrow m_SampleReadyEvent;           // 样本就绪事件
  MFWORKITEM_KEY m_SampleReadyKey = 0;                    // Media Foundation工作项键
- wil::unique_hfile m_hFile;                              // 输出文件句柄
+ AudioSink* m_pSink = nullptr;                           // 输出 Sink（不持有所有权）
  wil::critical_section m_CritSec;                        // 临界区，用于同步
  DWORD m_dwQueueID = 0;                                  // 异步队列ID
- DWORD m_cbHeaderSize = 0;                               // WAV文件头大小
- DWORD m_cbDataSize = 0;                                 // 音频数据大小
 
  PCWSTR m_outputFileName = nullptr;                      // 输出文件名
  HRESULT m_activateResult = E_UNEXPECTED;                // 激活操作结果

@@ -28,6 +28,7 @@
 #include <locale.h>
 #include "LoopbackCapture.h"
 #include "AudioSessionLister.h"
+#include "WavSink.h"
 
 static std::atomic<bool> g_bStopCapture(false);
 
@@ -205,6 +206,10 @@ int wmain(int argc, wchar_t* argv[]) {
 	}
 	CLoopbackCapture loopbackCapture;
 	g_pCurrentCapture = &loopbackCapture;
+
+	// 注入输出 Sink（WAV 格式）
+	WavSink wavSink;
+	loopbackCapture.SetAudioSink(&wavSink);
 	HRESULT hr;
 	if (args.captureMode == 0) {
 		std::wcout << L"Starting global audio capture (system mix)..." << std::endl;
@@ -260,12 +265,16 @@ int wmain(int argc, wchar_t* argv[]) {
 	else if (processExited) {
 		std::wcout << L"Target process has exited. Stopping capture..." << std::endl;
 	}
-	loopbackCapture.StopCaptureAsync();
+	// 停止捕获并检查结果（K7 修复：写盘失败要让用户知道）
+	HRESULT hrStop = loopbackCapture.StopCaptureAsync();
 	std::wcout << L"Finishing capture and saving file..." << std::endl;
-	HANDLE hStopEvent = loopbackCapture.GetStopEventHandle();
-	if (hStopEvent != NULL) {
+	if (FAILED(hrStop)) {
+		std::wcout << L"Warning: recording stopped with error 0x" << std::hex << hrStop
+			<< L". The file may be incomplete." << std::endl;
 	}
-	std::wcout << L"Capture completed. File saved to: " << args.outputPath << std::endl;
+	else {
+		std::wcout << L"Capture completed. File saved to: " << args.outputPath << std::endl;
+	}
 	g_pCurrentCapture = nullptr;
 	return 0;
 }

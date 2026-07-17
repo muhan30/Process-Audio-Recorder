@@ -34,6 +34,7 @@
 #include <audioclientactivationparams.h>  // 音频客户端激活参数
 
 #include "LoopbackCapture.h"  // 环回捕获头文件
+#include "AudioSink.h"        // 音频输出接口
 
 #define BITS_PER_BYTE 8  // 定义每字节位数
 
@@ -155,11 +156,11 @@ HRESULT CLoopbackCapture::ActivateCompleted(IActivateAudioInterfaceAsyncOperatio
 			m_CaptureFormat.nBlockAlign = m_CaptureFormat.nChannels * m_CaptureFormat.wBitsPerSample / BITS_PER_BYTE;
 			m_CaptureFormat.nAvgBytesPerSec = m_CaptureFormat.nSamplesPerSec * m_CaptureFormat.nBlockAlign;
 
-			// 初始化音频客户端
+			// 初始化音频客户端（K3 修复：AUTOCONVERTPCM 并入 flags，periodicity 传 0，与全局模式一致）
 			RETURN_IF_FAILED(m_AudioClient->Initialize(AUDCLNT_SHAREMODE_SHARED,
-				AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+				AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK | AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
 				200000,  // 缓冲区持续时间（200毫秒）
-				AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,  // 自动转换PCM格式
+				0,
 				&m_CaptureFormat,
 				nullptr));
 
@@ -175,8 +176,9 @@ HRESULT CLoopbackCapture::ActivateCompleted(IActivateAudioInterfaceAsyncOperatio
 			// 设置事件句柄
 			RETURN_IF_FAILED(m_AudioClient->SetEventHandle(m_SampleReadyEvent.get()));
 
-			// 创建WAV文件
-			RETURN_IF_FAILED(CreateWAVFile());
+			// 初始化输出 Sink（未注入则报错）
+			RETURN_HR_IF(E_POINTER, m_pSink == nullptr);
+			RETURN_IF_FAILED(m_pSink->Initialize(m_outputFileName, m_CaptureFormat));
 
 			// 更新设备状态为已初始化
 			m_DeviceState = DeviceState::Initialized;
@@ -185,56 +187,6 @@ HRESULT CLoopbackCapture::ActivateCompleted(IActivateAudioInterfaceAsyncOperatio
 
 	// 设置激活完成事件
 	m_hActivateCompleted.SetEvent();
-	return S_OK;
-}
-
-// 创建WAV文件并写入文件头
-HRESULT CLoopbackCapture::CreateWAVFile()
-{
-	return SetDeviceStateErrorIfFailed([&]()->HRESULT
-		{
-			// 创建文件
-			m_hFile.reset(CreateFile(m_outputFileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL));
-			RETURN_LAST_ERROR_IF(!m_hFile);
-
-			// 写入RIFF和fmt块头
-			DWORD header[] = {
-							FCC('RIFF'), 0, FCC('WAVE'), FCC('fmt '), sizeof(m_CaptureFormat)
-			};
-			DWORD dwBytesWritten = 0;
-			RETURN_IF_WIN32_BOOL_FALSE(WriteFile(m_hFile.get(), header, sizeof(header), &dwBytesWritten, NULL));
-			m_cbHeaderSize += dwBytesWritten;
-
-			// 写入音频格式信息
-			WI_ASSERT(m_CaptureFormat.cbSize == 0);
-			RETURN_IF_WIN32_BOOL_FALSE(WriteFile(m_hFile.get(), &m_CaptureFormat, sizeof(m_CaptureFormat), &dwBytesWritten, NULL));
-			m_cbHeaderSize += dwBytesWritten;
-
-			// 写入数据块头
-			DWORD data[] = { FCC('data'), 0 };
-			RETURN_IF_WIN32_BOOL_FALSE(WriteFile(m_hFile.get(), data, sizeof(data), &dwBytesWritten, NULL));
-			m_cbHeaderSize += dwBytesWritten;
-
-			return S_OK;
-		}());
-}
-
-// 修复WAV文件头（写入正确的数据大小）
-HRESULT CLoopbackCapture::FixWAVHeader()
-{
-	// 定位到数据大小字段并写入实际数据大小
-	DWORD dwPtr = SetFilePointer(m_hFile.get(), m_cbHeaderSize - sizeof(DWORD), NULL, FILE_BEGIN);
-	RETURN_LAST_ERROR_IF(INVALID_SET_FILE_POINTER == dwPtr);
-	DWORD dwBytesWritten = 0;
-	RETURN_IF_WIN32_BOOL_FALSE(WriteFile(m_hFile.get(), &m_cbDataSize, sizeof(DWORD), &dwBytesWritten, NULL));
-
-	// 定位到文件总大小字段并写入正确值
-	RETURN_LAST_ERROR_IF(INVALID_SET_FILE_POINTER == SetFilePointer(m_hFile.get(), sizeof(DWORD), NULL, FILE_BEGIN));
-	DWORD cbTotalSize = m_cbDataSize + m_cbHeaderSize - 8;
-	RETURN_IF_WIN32_BOOL_FALSE(WriteFile(m_hFile.get(), &cbTotalSize, sizeof(DWORD), &dwBytesWritten, NULL));
-
-	// 刷新文件缓冲区
-	RETURN_IF_WIN32_BOOL_FALSE(FlushFileBuffers(m_hFile.get()));
 	return S_OK;
 }
 
@@ -331,8 +283,9 @@ HRESULT CLoopbackCapture::ActivateAudioInterfaceGlobal()
 			// 设置事件句柄
 			RETURN_IF_FAILED(m_AudioClient->SetEventHandle(m_SampleReadyEvent.get()));
 
-			// 创建WAV文件
-			RETURN_IF_FAILED(CreateWAVFile());
+			// 初始化输出 Sink（未注入则报错）
+			RETURN_HR_IF(E_POINTER, m_pSink == nullptr);
+			RETURN_IF_FAILED(m_pSink->Initialize(m_outputFileName, m_CaptureFormat));
 
 			// 更新设备状态为已初始化
 			m_DeviceState = DeviceState::Initialized;
@@ -365,14 +318,14 @@ HRESULT CLoopbackCapture::OnStartCapture(IMFAsyncResult* pResult)
 // 异步停止捕获
 HRESULT CLoopbackCapture::StopCaptureAsync()
 {
-	// 检查设备状态是否有效
-	RETURN_HR_IF(E_NOT_VALID_STATE, (m_DeviceState != DeviceState::Capturing) && (m_DeviceState != DeviceState::Error));
-
-	// 如果已经在停止或已停止，直接返回
+	// 已在停止流程中则直接返回（K5 修复：先于状态校验判断）
 	if (m_DeviceState == DeviceState::Stopping || m_DeviceState == DeviceState::Stopped)
 	{
 		return S_OK;
 	}
+
+	// 仅捕获中或错误态允许停止
+	RETURN_HR_IF(E_NOT_VALID_STATE, (m_DeviceState != DeviceState::Capturing) && (m_DeviceState != DeviceState::Error));
 
 	// 更新设备状态为停止中
 	m_DeviceState = DeviceState::Stopping;
@@ -502,23 +455,25 @@ HRESULT CLoopbackCapture::OnAudioSampleRequested()
 // 写入线程处理函数
 void CLoopbackCapture::WriterThreadProc()
 {
-	// 循环处理音频数据，直到捕获停止且队列为空
-	while (m_bIsCapturing || !m_AudioQueue.empty())
+	for (;;)
 	{
 		std::vector<BYTE> audioData;
 
-		// 从队列中获取音频数据
+		// 从队列中获取音频数据（K4 修复：队列状态判断全部持锁进行）
 		{
 			std::unique_lock<std::mutex> lock(m_QueueMutex);
 
-			// 等待队列中有数据或捕获停止
+			// 等待新数据或停止信号（谓词防虚假唤醒）
 			m_QueueCV.wait(lock, [this] {
 				return !m_AudioQueue.empty() || !m_bIsCapturing;
 				});
 
-			// 如果队列为空，继续等待
 			if (m_AudioQueue.empty())
 			{
+				if (!m_bIsCapturing)
+				{
+					break;  // 已停止且队列排空，收工
+				}
 				continue;
 			}
 
@@ -527,28 +482,22 @@ void CLoopbackCapture::WriterThreadProc()
 			m_AudioQueue.pop();
 		}
 
-		// 将音频数据写入文件
-		if (!audioData.empty())
+		// 写入 Sink（写失败记录首个错误，继续排空队列避免生产端阻塞）
+		if (!audioData.empty() && m_pSink && SUCCEEDED(m_writerThreadResult))
 		{
-			DWORD dwBytesWritten = 0;
-			if (!WriteFile(m_hFile.get(), audioData.data(), static_cast<DWORD>(audioData.size()), &dwBytesWritten, NULL))
+			HRESULT hr = m_pSink->WriteChunk(audioData.data(), static_cast<DWORD>(audioData.size()));
+			if (FAILED(hr))
 			{
-				// 写入失败处理
-				m_writerThreadResult = HRESULT_FROM_WIN32(GetLastError());
-				m_bIsCapturing = false;
-				continue;
+				m_writerThreadResult = hr;
 			}
-
-			// 更新已写入数据大小
-			m_cbDataSize += dwBytesWritten;
 		}
 	}
 
-	// 捕获完成后修复WAV文件头
-	if (SUCCEEDED(m_writerThreadResult))
+	// 收尾（无论成败都要调，保证资源释放；错误保留首个）
+	if (m_pSink)
 	{
-		HRESULT hr = FixWAVHeader();
-		if (FAILED(hr))
+		HRESULT hr = m_pSink->Finalize();
+		if (SUCCEEDED(m_writerThreadResult) && FAILED(hr))
 		{
 			m_writerThreadResult = hr;
 		}
