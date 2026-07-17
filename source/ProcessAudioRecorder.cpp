@@ -33,6 +33,7 @@
 #include "M4aSink.h"
 #include "MicCapture.h"
 #include "AudioMixer.h"
+#include "LevelMeter.h"
 
 static std::atomic<bool> g_bStopCapture(false);
 
@@ -191,7 +192,19 @@ BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
 	return FALSE;
 }
 
-void DisplayProgress(const std::chrono::seconds& duration) {
+// 画 0-100 电平为 10 格字符条，例：[###-------]
+static std::wstring DrawLevelBar(int level)
+{
+	std::wstring bar;
+	int filled = (level + 9) / 10;
+	for (int i = 0; i < 10; i++) {
+		bar += (i < filled) ? L'#' : L'-';
+	}
+	return bar;
+}
+
+void DisplayProgress(const std::chrono::seconds& duration, int sysLevel, int micLevel, bool micEnabled)
+{
 	auto totalSeconds = duration.count();
 	auto hours = totalSeconds / 3600;
 	auto minutes = (totalSeconds % 3600) / 60;
@@ -200,9 +213,12 @@ void DisplayProgress(const std::chrono::seconds& duration) {
 	std::wcout << L"\r● Recording [";
 	std::wcout << std::setw(2) << std::setfill(L'0') << hours << L":"
 		<< std::setw(2) << std::setfill(L'0') << minutes << L":"
-		<< std::setw(2) << std::setfill(L'0') << seconds << L"]"
-		<< L" - Press Ctrl+C to stop        "
-		<< std::flush;
+		<< std::setw(2) << std::setfill(L'0') << seconds << L"]";
+	std::wcout << L" SYS[" << DrawLevelBar(sysLevel) << L"]";
+	if (micEnabled) {
+		std::wcout << L" MIC[" << DrawLevelBar(micLevel) << L"]";
+	}
+	std::wcout << L" Ctrl+C to stop  " << std::flush;
 }
 
 int wmain(int argc, wchar_t* argv[]) {
@@ -295,15 +311,23 @@ int wmain(int argc, wchar_t* argv[]) {
 	std::wcout << L"Output format: " << args.format << std::endl;
 
 	// 麦克风混音组装（声明顺序即析构安全顺序，勿调换）
+	LevelState levelState;
 	AudioMixer mixer;
 	MicCapture mic;
+	// 统一分流：先算系统声电平，再按麦克风开关决定混音或直通
+	loopbackCapture.SetDataTap([&](std::vector<BYTE>&& chunk) {
+		levelState.systemLevel = CalcPeakLevel(chunk.data(), static_cast<DWORD>(chunk.size()));
+		if (args.micEnabled) {
+			loopbackCapture.EnqueueAudioData(mixer.MixWithLoopback(std::move(chunk)));
+		}
+		else {
+			loopbackCapture.EnqueueAudioData(std::move(chunk));
+		}
+		});
 	if (args.micEnabled) {
 		mixer.SetMicGain(args.micGain);
-		// 环回块 → 混音 → 回送写入队列
-		loopbackCapture.SetDataTap([&mixer, &loopbackCapture](std::vector<BYTE>&& chunk) {
-			loopbackCapture.EnqueueAudioData(mixer.MixWithLoopback(std::move(chunk)));
-			});
-		HRESULT hrMic = mic.Initialize([&mixer](const BYTE* data, DWORD size) {
+		HRESULT hrMic = mic.Initialize([&mixer, &levelState](const BYTE* data, DWORD size) {
+			levelState.micLevel = CalcPeakLevel(data, size);
 			mixer.PushMicData(data, size);
 			});
 		if (FAILED(hrMic)) {
@@ -369,8 +393,8 @@ int wmain(int argc, wchar_t* argv[]) {
 		}
 		auto currentTime = std::chrono::steady_clock::now();
 		auto duration = std::chrono::duration_cast<std::chrono::seconds>(currentTime - startTime);
-		DisplayProgress(duration);
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		DisplayProgress(duration, levelState.systemLevel, levelState.micLevel, args.micEnabled);
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	}
 	std::wcout << std::endl;
 	if (userInterrupted) {
