@@ -27,6 +27,7 @@
 #include <Windows.h>
 #include <locale.h>
 #include "LoopbackCapture.h"
+#include "AudioSessionLister.h"
 
 static std::atomic<bool> g_bStopCapture(false);
 
@@ -158,6 +159,42 @@ void DisplayProgress(const std::chrono::seconds& duration) {
 int wmain(int argc, wchar_t* argv[]) {
 	_wsetlocale(LC_ALL, L"");
 	SetConsoleTitleW(L"Cirong Process Audio Recorder");
+
+	// 统一初始化 COM（--list 与录音路径均依赖）
+	HRESULT hrCom = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+	if (FAILED(hrCom)) {
+		std::wcout << L"Error: COM initialization failed. 0x" << std::hex << hrCom << std::endl;
+		return 2;
+	}
+
+	// --list：列出正在发声的软件（独立分支，不进入录音流程）
+	if (argc >= 2 && wcscmp(argv[1], L"--list") == 0) {
+		std::vector<AudioSessionInfo> sessions;
+		HRESULT hr = ListAudioSessions(sessions);
+		if (FAILED(hr)) {
+			std::wcout << L"Error: failed to enumerate audio sessions. 0x" << std::hex << hr << std::endl;
+			return 2;
+		}
+		if (sessions.empty()) {
+			std::wcout << L"No app is using audio right now.\n"
+				<< L"Tip: start playing sound in the target app, then run --list again." << std::endl;
+			return 0;
+		}
+		std::wcout << L"Apps using audio (louder ones first):\n\n";
+		std::wcout << std::setw(8) << L"PID" << L"  "
+			<< std::left << std::setw(28) << L"Process" << std::right
+			<< L"Status" << L"\n";
+		std::wcout << L"--------  ----------------------------  ---------------\n";
+		for (const auto& s : sessions) {
+			std::wcout << std::setw(8) << s.processId << L"  "
+				<< std::left << std::setw(28) << s.processName << std::right
+				<< (s.isActive ? L"<<< PLAYING" : L"silent") << L"\n";
+		}
+		std::wcout << L"\nTo record one of them:\n"
+			<< L"  ProcessAudioRecorder --pid <PID> --mode 1 --path D:\\rec.wav" << std::endl;
+		return 0;
+	}
+
 	CommandLineArgs args = ParseCommandLine(argc, argv);
 	if (!args.isValid) {
 		if (!args.errorMessage.empty()) {

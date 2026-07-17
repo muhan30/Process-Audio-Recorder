@@ -16,6 +16,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/source)
 add_executable(ProcessAudioRecorder
     source/ProcessAudioRecorder.cpp
     source/LoopbackCapture.cpp
+    source/AudioSessionLister.cpp
 )
 
 # 强制链接原版项目所依赖的 Windows 底层音频与媒体库
