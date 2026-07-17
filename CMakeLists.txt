@@ -18,6 +18,7 @@ add_executable(ProcessAudioRecorder
     source/LoopbackCapture.cpp
     source/AudioSessionLister.cpp
     source/WavSink.cpp
+    source/M4aSink.cpp
 )
 
 # 强制链接原版项目所依赖的 Windows 底层音频与媒体库

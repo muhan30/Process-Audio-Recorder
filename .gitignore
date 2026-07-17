@@ -20,7 +20,7 @@ mono_crash.*
 # Build results
 [Bb]uild/
 .superpowers/
-recording/
+recordings/
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
@@ -420,5 +420,3 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-# Testing recordings
-recordings/

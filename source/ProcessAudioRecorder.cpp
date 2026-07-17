@@ -22,6 +22,7 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <string>
 #include <thread>
 #include <Windows.h>
@@ -29,6 +30,7 @@
 #include "LoopbackCapture.h"
 #include "AudioSessionLister.h"
 #include "WavSink.h"
+#include "M4aSink.h"
 
 static std::atomic<bool> g_bStopCapture(false);
 
@@ -38,6 +40,7 @@ struct CommandLineArgs {
 	DWORD processId = 0;
 	int captureMode = 1;
 	std::wstring outputPath;
+	std::wstring format;  // 输出格式："m4a"（默认）或 "wav"
 	bool isValid = false;
 	std::wstring errorMessage;
 };
@@ -78,6 +81,24 @@ CommandLineArgs ParseCommandLine(int argc, wchar_t* argv[]) {
 		return args;
 	}
 
+	// 输出格式：--format 显式指定，缺省按扩展名推断（.wav → wav，其余 → m4a）
+	if (params.find(L"format") != params.end()) {
+		args.format = params[L"format"];
+		if (args.format != L"m4a" && args.format != L"wav") {
+			args.errorMessage = L"Error: Invalid format: " + args.format +
+				L"\nMust be m4a or wav.";
+			return args;
+		}
+	}
+	else {
+		std::wstring lowerPath = args.outputPath;
+		for (auto& ch : lowerPath) ch = towlower(ch);
+		const std::wstring wavExt = L".wav";
+		args.format = (lowerPath.size() >= wavExt.size() &&
+			lowerPath.compare(lowerPath.size() - wavExt.size(), wavExt.size(), wavExt) == 0)
+			? L"wav" : L"m4a";
+	}
+
 	wchar_t* endPtr;
 	if (params.find(L"mode") != params.end()) {
 		args.captureMode = std::wcstol(params[L"mode"].c_str(), &endPtr, 10);
@@ -115,7 +136,8 @@ void usage() {
 		<< L"                 0 - Global mode: Capture all system audio (system mix)\n"
 		<< L"                 1 - Include mode: Capture target process and its children (default)\n"
 		<< L"                 2 - Exclude mode: Capture all except target process and its children\n"
-		<< L"  --path <PATH>  Output file path (required)\n\n"
+		<< L"  --path <PATH>  Output file path (required)\n"
+		<< L"  --format <F>   Output format: m4a (default, compressed) or wav (lossless)\n\n"
 		<< L"Examples:\n"
 		<< L"  ProcessAudioRecorder --mode 0 --path C:\\system_audio.wav\n"
 		<< L"  ProcessAudioRecorder --pid 1234 --mode 1 --path C:\\record.wav\n"
@@ -207,9 +229,16 @@ int wmain(int argc, wchar_t* argv[]) {
 	CLoopbackCapture loopbackCapture;
 	g_pCurrentCapture = &loopbackCapture;
 
-	// 注入输出 Sink（WAV 格式）
-	WavSink wavSink;
-	loopbackCapture.SetAudioSink(&wavSink);
+	// 注入输出 Sink（按格式选择：m4a 压缩 / wav 无损）
+	std::unique_ptr<AudioSink> sink;
+	if (args.format == L"wav") {
+		sink = std::make_unique<WavSink>();
+	}
+	else {
+		sink = std::make_unique<M4aSink>();
+	}
+	loopbackCapture.SetAudioSink(sink.get());
+	std::wcout << L"Output format: " << args.format << std::endl;
 	HRESULT hr;
 	if (args.captureMode == 0) {
 		std::wcout << L"Starting global audio capture (system mix)..." << std::endl;
