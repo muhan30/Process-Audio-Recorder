@@ -2,7 +2,7 @@
 
 > 本文档是项目的"单一事实来源"，供每次开发前 AI/人快速掌握项目状态。
 > 任何功能开发、架构变更后必须同步更新本文档。
-> 最后更新：2026-07-17
+> 最后更新：2026-07-18（阶段一引擎完工）
 
 ---
 
@@ -49,13 +49,22 @@ AudioLoopbackRecorder/
 ├── CMakeLists.txt              # CMake 构建脚本（C++17，UNICODE，链接 mfplat/mmdevapi 等）
 ├── include/wil/                # vendor 的微软 WIL 库（第三方，勿改）
 ├── references/                 # 微软 WASAPI 官方文档副本（capturing-a-stream / loopback-recording）
+├── recordings/                 # 用户测试录音存放处（git 已忽略）
 ├── build/                      # 构建产物（git 已忽略）
+├── docs/superpowers/           # SPEC 与实施计划文档（specs/ 与 plans/）
 └── source/
-    ├── ProcessAudioRecorder.cpp  # 入口：命令行解析、进程存活监控、Ctrl+C、进度显示
-    ├── LoopbackCapture.h/.cpp    # 核心类 CLoopbackCapture：三种模式的捕获引擎
+    ├── ProcessAudioRecorder.cpp  # 入口：命令行解析、--list/--mic-test 分支、组装、进度+电平显示
+    ├── LoopbackCapture.h/.cpp    # 核心类 CLoopbackCapture：环回捕获引擎（含数据分流 tap）
+    ├── AudioSessionLister.h/.cpp # 发声会话枚举（--list 的实现）
+    ├── AudioSink.h               # 输出接口抽象（Initialize/WriteChunk/Finalize）
+    ├── WavSink.h/.cpp            # WAV 输出实现（含 4GB 上限保护）
+    ├── M4aSink.h/.cpp            # M4A/AAC 输出实现（MF SinkWriter，fMP4 崩溃保护）
+    ├── MicCapture.h/.cpp         # 麦克风采集（WASAPI 事件驱动，专用线程）
+    ├── AudioMixer.h/.cpp         # 双流混音器（环回驱动、水位控制、麦克风增益）
+    ├── LevelMeter.h              # 峰值电平计算 + 双通道电平状态
     ├── Common.h                  # METHODASYNCCALLBACK 宏（COM 回调样板消除）
     ├── resource.h / ProcessAudioRecorder.rc  # 版本资源（仅 VS 构建使用，.rc 为 UTF-16 编码）
-    └── ProcessAudioRecorder.sln/.vcxproj/packages.config  # VS2022 构建体系
+    └── ProcessAudioRecorder.sln/.vcxproj/packages.config  # VS2022 构建体系（未跟进新文件，仅存档）
 ```
 
 所有源文件统一为 UTF-8 编码（`ProcessAudioRecorder.cpp` 带 BOM，其余无 BOM）。
@@ -64,16 +73,24 @@ AudioLoopbackRecorder/
 
 ```
 ProcessAudioRecorder [--pid <PID>] --mode <MODE> --path <FILEPATH>
+                     [--format m4a|wav] [--mic on|off] [--mic-gain 0.1-8.0]
+                     [--list] [--mic-test]
 ```
 | 参数 | 说明 |
 |------|------|
 | `--mode 0` | 全局环回（系统混音），无需 --pid |
 | `--mode 1` | 进程包含：只录 PID 及其**子进程树** |
 | `--mode 2` | 进程排除：录除 PID 及其子进程树外的所有声音 |
-| `--path` | 输出 WAV 路径（必填） |
+| `--path` | 输出文件路径（必填） |
+| `--format m4a\|wav` | 输出格式，默认由扩展名推断（.wav → wav，其余 → m4a） |
+| `--mic on\|off` | 是否混入麦克风，默认 off |
+| `--mic-gain 0.1-8.0` | 麦克风软件增益，默认 1.0（用户实测推荐 3） |
+| `--list` | 列出当前正在发声的软件（PID + 进程名 + 状态），独立命令 |
+| `--mic-test` | 录 5 秒麦克风到 mic_test.wav，自检通路，独立命令 |
 
-输出格式固定：PCM 44.1kHz / 16bit / 立体声。
-停止条件：Ctrl+C，或目标进程退出（模式 1/2，主循环每 500ms 轮询）。
+输出格式：默认 M4A（AAC 128kbps，30 分钟 ≈ 28MB），可选 WAV（PCM 44.1kHz / 16bit / 立体声）。fMP4 容器实现崩溃保护。
+停止条件：Ctrl+C，或目标进程退出（模式 1/2，主循环每 200ms 轮询）。
+进度行实时显示系统声/麦克风双路电平条（`SYS[######----] MIC[###-------]`）。
 
 ## 6. 架构与数据流
 
@@ -107,22 +124,29 @@ WRL `RuntimeClass`，实现 `IActivateAudioInterfaceCompletionHandler`；通过 
 | # | 位置 | 问题 | 严重度 |
 |---|------|------|--------|
 | K1 | CMakeLists.txt | 未编译 .rc，CMake 产物无版本信息（且 MSVC 下未加 /utf-8 编译选项，无 BOM 的 UTF-8 源文件注释可能触发 C4819 警告） | 低 |
-| K2 | ProcessAudioRecorder.cpp:228-230 | `GetStopEventHandle` 取出句柄后 `if (hStopEvent != NULL) {}` 空体，死代码 | 低 |
-| K3 | LoopbackCapture.cpp:159-164 | 进程模式 `Initialize` 第 4 参（periodicity）误传 `AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM` 标志；全局模式则正确地把它并入第 2 参 flags。进程环回虚拟设备会忽略 periodicity 所以未出错，但两处写法应统一 | 中 |
-| K4 | LoopbackCapture.cpp:506 | `WriterThreadProc` 循环条件读 `m_AudioQueue.empty()` 未持锁，数据竞争（实践中影响小，但属 UB） | 中 |
-| K5 | LoopbackCapture.cpp:369-375 | `StopCaptureAsync` 先因状态非 Capturing/Error 返回 `E_NOT_VALID_STATE`，其后的 Stopping/Stopped 判断为不可达死代码 | 低 |
-| K6 | LoopbackCapture.h | `m_cbDataSize` 为 DWORD，录音超 4GB（约 6.7 小时）溢出；WAV 格式本身也有 4GB 上限 | 中 |
-| K7 | ProcessAudioRecorder.cpp:226 | `StopCaptureAsync()` 返回值未检查，写盘失败（如磁盘满）用户无感知 | 中 |
-| K8 | 体验 | 录不到声（选错 PID）时无任何反馈，产出无声文件——需实时电平显示 | 高（与 --list 同源痛点） |
+| K2 | ProcessAudioRecorder.cpp | ~~死代码~~ **已修复**（2026-07，WavSink 重构中连带移除） | - |
+| K3 | LoopbackCapture.cpp | ~~进程模式 Initialize 参数不一致~~ **已修复**（2026-07），实测：AUTOCONVERTPCM 并入 flags + periodicity=0 在进程环回虚拟设备上工作正常 | - |
+| K4 | LoopbackCapture.cpp | ~~WriterThreadProc 队列竞态~~ **已修复**（2026-07），循环重构为持锁排空+条件变量谓词 | - |
+| K5 | LoopbackCapture.cpp | ~~StopCaptureAsync 死代码~~ **已修复**（2026-07），Stopping/Stopped 判定前置 | - |
+| K6 | WavSink.cpp | WAV 格式有 4GB 上限，已在 WavSink::WriteChunk 加逼近上限时返回错误（HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE)）；M4A 默认格式自然规避 | 低（M4A 默认后极少触发） |
+| K7 | ProcessAudioRecorder.cpp | ~~StopCaptureAsync 返回值未检查~~ **已修复**（2026-07），失败打印 Warning | - |
+| K8 | 体验 | ~~录不到声无反馈~~ **已修复**（2026-07），进度行实时双路电平条 `SYS[######] MIC[###]`——静音条直接看穿 | - |
 
 ## 8. 路线图
 
 | 优先级 | 功能 | 状态 | 说明 |
 |--------|------|------|------|
-| P1 | `--list`：枚举正在发声的进程（PID/进程名/会话状态） | 未开始 | 用 `IAudioSessionManager2` → `IAudioSessionEnumerator` → `IAudioSessionControl2::GetProcessId()`；解决多进程应用找不到发声 PID 的核心痛点 |
-| P2 | 麦克风 + loopback 双流同步捕获与混音 | 未开始 | 微信通话"双方声音"必需；涉及双流时钟同步、重采样、混音策略，需单独 SPEC |
-| P3 | 录制中实时电平显示 | 未开始 | 解决"录了个寂寞"无反馈问题（K8） |
+| P1 | `--list`：枚举正在发声的进程（PID/进程名/会话状态） | ✅ 已完成（CLI，2026-07） | AudioSessionLister 模块；`--list` 独立命令 |
+| P2 | 麦克风 + loopback 双流同步捕获与混音 | ✅ 已完成（CLI，2026-07） | MicCapture + AudioMixer；`--mic on` + `--mic-gain` |
+| P3 | 录制中实时电平显示 | ✅ 已完成（CLI，2026-07） | LevelMeter；进度行 SYS/MIC 双路字符条 |
+| P4 | 压缩格式输出 + 崩溃保护 | ✅ 已完成（CLI，2026-07） | M4aSink（AAC/fMP4）；`--format m4a\|wav` |
 | 远期 | MP3/Opus 编码输出、GUI、DLL 化引擎 | 未开始 | 原作者 README 中的方向，暂不排期 |
+
+**阶段一实测结论（2026-07-18，全部用户亲手验证）：**
+- fMP4 崩溃保护有效：taskkill /F 强杀后文件仍可播放到中断点；正常文件在本机播放器与微信中兼容 ✓
+- K3 修复实测无回归：进程环回虚拟设备接受标准 flags 写法 ✓
+- 用户环境最佳麦克风增益 = 3（小声说话场景）；GUI 需做成可调滑块，默认 3
+- 下一步：阶段二 GUI 包装（主窗口/托盘/设置页），按规格第 6 节另立实施计划
 
 **流程约定**：每个功能严格走 SPEC →（人审）→ PLAN →（人审）→ CODE → REVIEW →（人审）→ VERIFY；SPEC/PLAN 文档存放于 `docs/` 目录（首个功能开发时创建），作为项目资产保留。
 

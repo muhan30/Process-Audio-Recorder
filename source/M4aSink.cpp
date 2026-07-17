@@ -15,7 +15,11 @@ HRESULT M4aSink::Initialize(PCWSTR filePath, const WAVEFORMATEX& format)
     m_mfStarted = true;
     m_avgBytesPerSec = format.nAvgBytesPerSec;
 
-    RETURN_IF_FAILED(MFCreateSinkWriterFromURL(filePath, nullptr, nullptr, &m_writer));
+    // fMP4 容器：分段写入，进程意外终止时文件仍可播放到中断点（崩溃保护）
+    wil::com_ptr_nothrow<IMFAttributes> attrs;
+    RETURN_IF_FAILED(MFCreateAttributes(&attrs, 1));
+    RETURN_IF_FAILED(attrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_FMPEG4));
+    RETURN_IF_FAILED(MFCreateSinkWriterFromURL(filePath, nullptr, attrs.get(), &m_writer));
 
     // 输出流：AAC，44.1kHz/立体声/128kbps（16000 字节每秒）
     wil::com_ptr_nothrow<IMFMediaType> outType;
