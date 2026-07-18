@@ -25,6 +25,8 @@
 #define IDC_TIMER_LABEL    1014
 #define IDC_SIZE_LABEL     1015
 #define IDC_HINT_LABEL     1016
+#define IDC_PATH_EDIT2     1017
+#define IDC_PATH_BROWSE2   1018
 
 class SessionList
 {

@@ -21,6 +21,7 @@ mono_crash.*
 [Bb]uild/
 .superpowers/
 recordings/
+icon-preview.html
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/

@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <CommCtrl.h>
 #include "MainWindow.h"
+#include "Logger.h"
 
 static const WCHAR* MUTEX_NAME = L"Local\\ProcessAudioRecorderGUI_SingleInstance";
 
@@ -39,6 +40,9 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPWSTR, _
     icc.dwICC = ICC_LISTVIEW_CLASSES | ICC_BAR_CLASSES | ICC_STANDARD_CLASSES;
     InitCommonControlsEx(&icc);
 
+    Logger::Init();
+    Logger::LogStartup();
+
     MainWindow mainWin(hInstance);
     if (!mainWin.CreateMainWindow(nCmdShow))
     {
@@ -49,6 +53,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE, _In_ LPWSTR, _
 
     mainWin.RunMessageLoop();
 
+    Logger::LogShutdown();
     CoUninitialize();
     CloseHandle(hMutex);
     return 0;

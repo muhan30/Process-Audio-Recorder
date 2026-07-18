@@ -48,6 +48,7 @@ add_executable(ProcessAudioRecorderGUI WIN32
     source/M4aSink.cpp
     source/MicCapture.cpp
     source/AudioMixer.cpp
+    source/Logger.cpp
 )
 
 target_link_libraries(ProcessAudioRecorderGUI
