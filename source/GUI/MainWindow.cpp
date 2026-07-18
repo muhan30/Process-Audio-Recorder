@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "SettingsDialog.h"
+#include "Logger.h"
 #include <CommCtrl.h>
 #include <shellapi.h>
 #include <sstream>
@@ -25,7 +26,8 @@ MainWindow::MainWindow(HINSTANCE hInst) : m_hInst(hInst)
     wc.lpfnWndProc = WndProc;
     wc.cbWndExtra = sizeof(MainWindow*);
     wc.hInstance = hInst;
-    wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    wc.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(101));
+    wc.hIconSm = LoadIcon(hInst, MAKEINTRESOURCE(101));
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.lpszClassName = WND_CLASS;
@@ -200,8 +202,13 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_USER_RECORDING_STOPPED:
+    {
         KillTimer(m_hWnd, 1);
-        // 写文件时间戳（统一路径：无论是手动停止还是自动停止都走这里）
+        // 日志：录音停止（记录时长和文件大小）
+        CaptureStatus st = m_engine.GetStatus();
+        Logger::LogRecStop(m_lastRecordingPath, st.bytesWritten, (int)st.elapsed.count(), !m_isRecording);
+
+        // 写文件时间戳
         if (!m_lastRecordingPath.empty())
         {
             FILETIME ft;
@@ -217,6 +224,7 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         }
         ShowIdleState();
         return 0;
+    }
 
     case WM_TIMER:
         if (wp == 1)
@@ -307,9 +315,14 @@ void MainWindow::OnStart()
     GetSystemTime(&m_recordingStartST);
     m_lastRecordingPath = path;
 
+    // 日志：录音开始
+    std::wstring target = procName + L" (PID " + std::to_wstring(pid) + L")";
+    Logger::LogRecStart(target, path, m_sysGain, m_micGain);
+
     HRESULT hr = m_engine.Start(pid, true,
         [this](HRESULT) { PostMessage(m_hWnd, WM_USER_RECORDING_STOPPED, 0, 0); });
     if (FAILED(hr)) {
+        Logger::LogError(L"recording start failed", hr);
         MessageBox(m_hWnd, L"启动录音失败，请检查音频设备。", L"错误", MB_ICONERROR);
         return;
     }
@@ -395,7 +408,7 @@ void MainWindow::AddTrayIcon()
     m_nid.uID = 1;
     m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     m_nid.uCallbackMessage = WM_USER_TRAYICON;
-    m_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    m_nid.hIcon = LoadIcon(m_hInst, MAKEINTRESOURCE(101));
     wcscpy_s(m_nid.szTip, L"进程录音机");
     Shell_NotifyIcon(NIM_ADD, &m_nid);
 }

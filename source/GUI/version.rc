@@ -1,7 +1,7 @@
 #include <winver.h>
 
-// 应用图标
-IDI_APPLICATION ICON "app.ico"
+// 应用图标（自定义 ID 避免与系统 IDI_APPLICATION 冲突）
+101 ICON "app.ico"
 
 VS_VERSION_INFO VERSIONINFO
 FILEVERSION     1,0,0,0
