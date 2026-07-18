@@ -16,9 +16,13 @@ A Windows desktop recording tool based on [CingZeoi/AudioLoopbackRecorder](https
 - Recording an online class or meeting? Background noise from other apps stays out.
 - More precise than system "Stereo Mix" — like taking a screenshot of a single window instead of the entire desktop.
 
+### Download
+
+Pre-built executable: **[release/ProcessAudioRecorderGUI.exe](release/ProcessAudioRecorderGUI.exe)** (685 KB, single file, no installation required).
+
 ### Quick Start
 
-1. Double-click `ProcessAudioRecorderGUI.exe` (single file, portable, no installation).
+1. Double-click `ProcessAudioRecorderGUI.exe`.
 2. Start playing audio in your target app (e.g., connect a WeChat call), then click **刷新** (Refresh).
 3. Select the app from the list. Check "同时录我的麦克风" (Record my microphone).
 4. Click **开始录音** (Start Recording). You should see the level meters bouncing.
@@ -64,9 +68,13 @@ Full options: `--pid` / `--mode` (0=global, 1=include, 2=exclude) / `--mic on|of
 - 录在线课程/会议时，后台杂音不会混进来
 - 比系统"立体声混音"更精准——像"窗口截图"一样选中特定软件
 
+### 下载
+
+预编译可执行文件：**[release/ProcessAudioRecorderGUI.exe](release/ProcessAudioRecorderGUI.exe)**（685 KB，单文件，无需安装）。
+
 ### 怎么用
 
-1. 双击 `ProcessAudioRecorderGUI.exe`（单文件，绿色免安装）
+1. 双击 `ProcessAudioRecorderGUI.exe`
 2. 让目标软件出个声（比如接通微信电话），点 **刷新**
 3. 在列表中选中要录的软件，勾选"同时录我的麦克风"
 4. 点 **开始录音**，说话——看到电平条在跳就对了
