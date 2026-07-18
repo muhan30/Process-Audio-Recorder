@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "SettingsDialog.h"
 #include <CommCtrl.h>
+#include <shellapi.h>
 #include <sstream>
 #include <iomanip>
 #include <ctime>
@@ -126,7 +127,7 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         m_hSizeLabel = CreateWindowEx(0, WC_STATIC, L"",
             WS_CHILD | SS_CENTER, 100, 320, 260, 20,
             m_hWnd, (HMENU)(UINT_PTR)IDC_SIZE_LABEL, hi, nullptr);
-        m_hSaveLink = CreateWindowEx(0, WC_STATIC, L"",
+        m_hSaveLink = CreateWindowEx(0, WC_STATIC, L"录音文件保存在 exe 同目录的 recordings 文件夹",
             WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 350, 460, 20,
             m_hWnd, nullptr, hi, nullptr);
 
@@ -136,6 +137,7 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             if (c) SendMessage(c, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         LoadSettings();
+        AddTrayIcon();
         ShowIdleState();
         OnRefresh();
         SetTimer(m_hWnd, 2, 1000, nullptr);
@@ -158,6 +160,12 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         case IDC_MIC_CHECK:
             m_micEnabled = (SendMessage(m_hMicCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
             break;
+        case IDM_TRAY_SHOW:
+            ShowWindow(m_hWnd, SW_SHOW); break;
+        case IDM_TRAY_STOP:
+            if (m_isRecording) OnStop(); break;
+        case IDM_TRAY_EXIT:
+            if (OnExit()) { DestroyWindow(m_hWnd); } break;
         }
         return 0;
     }
@@ -181,11 +189,32 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
     }
 
     case WM_CLOSE:
-        ShowWindow(m_hWnd, SW_HIDE);
+        ShowWindow(m_hWnd, SW_HIDE);  // 缩到托盘，不退出
+        return 0;
+
+    case WM_USER_TRAYICON:
+        if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_CONTEXTMENU)
+            ShowTrayMenu();
+        else if (LOWORD(lp) == WM_LBUTTONUP)
+            ShowWindow(m_hWnd, SW_SHOW);
         return 0;
 
     case WM_USER_RECORDING_STOPPED:
         KillTimer(m_hWnd, 1);
+        // 写文件时间戳（统一路径：无论是手动停止还是自动停止都走这里）
+        if (!m_lastRecordingPath.empty())
+        {
+            FILETIME ft;
+            SystemTimeToFileTime(&m_recordingStartST, &ft);
+            HANDLE hFile = CreateFile(m_lastRecordingPath.c_str(), FILE_WRITE_ATTRIBUTES,
+                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (hFile != INVALID_HANDLE_VALUE)
+            {
+                SetFileTime(hFile, &ft, &ft, &ft);
+                CloseHandle(hFile);
+            }
+        }
         ShowIdleState();
         return 0;
 
@@ -197,6 +226,7 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_DESTROY:
+        RemoveTrayIcon();
         PostQuitMessage(0);
         return 0;
     }
@@ -218,6 +248,7 @@ void MainWindow::ShowIdleState()
     ShowWindow(m_hMicLevel, SW_HIDE);
     ShowWindow(m_hSizeLabel, SW_HIDE);
     ShowWindow(m_hSaveLink, SW_HIDE);
+    UpdateTrayIcon();
 }
 
 void MainWindow::ShowRecordingState()
@@ -234,6 +265,7 @@ void MainWindow::ShowRecordingState()
     ShowWindow(m_hMicLevel, SW_SHOW);
     ShowWindow(m_hSizeLabel, SW_SHOW);
     ShowWindow(m_hSaveLink, SW_SHOW);
+    UpdateTrayIcon();
 }
 
 // ---- 操作 ----
@@ -272,6 +304,8 @@ void MainWindow::OnStart()
     std::wstring path = recDir + L"\\" + std::wstring(name);
     m_engine.SetOutputPath(path);
     m_engine.SetOutputFormat(m_outputFormat);
+    GetSystemTime(&m_recordingStartST);
+    m_lastRecordingPath = path;
 
     HRESULT hr = m_engine.Start(pid, true,
         [this](HRESULT) { PostMessage(m_hWnd, WM_USER_RECORDING_STOPPED, 0, 0); });
@@ -287,7 +321,7 @@ void MainWindow::OnStop()
 {
     KillTimer(m_hWnd, 1);
     m_engine.Stop();
-    ShowIdleState();
+    // ShowIdleState 和 SetFileTime 统一由 WM_USER_RECORDING_STOPPED 消息触发
 }
 
 void MainWindow::OnSettings()
@@ -349,6 +383,68 @@ void MainWindow::UpdateStatus(const CaptureStatus& st)
     }
     UINT64 bytes = st.bytesWritten;
     if (bytes < 1024 * 1024) wsprintfW(buf, L"文件大小: %u KB", (UINT)(bytes / 1024));
-    else wsprintfW(buf, L"文件大小: %.1f MB", bytes / (1024.0 * 1024.0));
+    else swprintf_s(buf, L"文件大小: %.1f MB", bytes / (1024.0 * 1024.0));
     SetWindowText(m_hSizeLabel, buf);
+}
+
+// ---- 托盘 ----
+void MainWindow::AddTrayIcon()
+{
+    m_nid.cbSize = sizeof(NOTIFYICONDATA);
+    m_nid.hWnd = m_hWnd;
+    m_nid.uID = 1;
+    m_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    m_nid.uCallbackMessage = WM_USER_TRAYICON;
+    m_nid.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    wcscpy_s(m_nid.szTip, L"进程录音机");
+    Shell_NotifyIcon(NIM_ADD, &m_nid);
+}
+
+void MainWindow::RemoveTrayIcon()
+{
+    Shell_NotifyIcon(NIM_DELETE, &m_nid);
+}
+
+void MainWindow::UpdateTrayIcon()
+{
+    if (m_isRecording)
+    {
+        m_nid.uFlags = NIF_TIP;
+        wcscpy_s(m_nid.szTip, L"🔴 正在录音...");
+    }
+    else
+    {
+        m_nid.uFlags = NIF_TIP;
+        wcscpy_s(m_nid.szTip, L"进程录音机");
+    }
+    Shell_NotifyIcon(NIM_MODIFY, &m_nid);
+}
+
+void MainWindow::ShowTrayMenu()
+{
+    HMENU menu = CreatePopupMenu();
+    AppendMenu(menu, MF_STRING, IDM_TRAY_SHOW, L"打开主窗口");
+    if (m_isRecording)
+        AppendMenu(menu, MF_STRING, IDM_TRAY_STOP, L"停止录音");
+    AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenu(menu, MF_STRING, IDM_TRAY_EXIT, L"退出");
+
+    POINT pt;
+    GetCursorPos(&pt);
+    SetForegroundWindow(m_hWnd);
+    TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, m_hWnd, nullptr);
+    DestroyMenu(menu);
+}
+
+bool MainWindow::OnExit()
+{
+    if (m_isRecording)
+    {
+        int ret = MessageBox(m_hWnd,
+            L"正在录音中，确定要退出吗？录音文件会正常保存。",
+            L"确认退出", MB_YESNO | MB_ICONQUESTION);
+        if (ret != IDYES) return false;
+        OnStop();
+    }
+    return true;
 }

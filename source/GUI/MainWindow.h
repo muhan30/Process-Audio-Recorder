@@ -12,6 +12,11 @@
 #include "CaptureEngine.h"
 
 #define WM_USER_RECORDING_STOPPED (WM_USER + 1)
+#define WM_USER_TRAYICON        (WM_USER + 2)
+
+#define IDM_TRAY_SHOW   3001
+#define IDM_TRAY_STOP   3002
+#define IDM_TRAY_EXIT   3003
 
 class MainWindow
 {
@@ -48,6 +53,8 @@ private:
     float m_sysGain = 2.0f;
     float m_micGain = 4.0f;
     bool m_isRecording = false;
+    SYSTEMTIME m_recordingStartST = {};
+    std::wstring m_lastRecordingPath;
 
     // 窗口过程
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp);
@@ -58,11 +65,19 @@ private:
     void ShowIdleState();
     void ShowRecordingState();
 
+    // 托盘
+    NOTIFYICONDATA m_nid = {};
+    void AddTrayIcon();
+    void RemoveTrayIcon();
+    void UpdateTrayIcon();
+    void ShowTrayMenu();
+
     // 操作
     void OnRefresh();
     void OnStart();
     void OnStop();
     void OnSettings();
+    bool OnExit();
     void UpdateStatus(const CaptureStatus& st);
     void LoadSettings();
     void SaveSettings();
