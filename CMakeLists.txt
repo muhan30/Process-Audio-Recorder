@@ -39,6 +39,7 @@ add_executable(ProcessAudioRecorderGUI WIN32
     source/GUI/Main.cpp
     source/GUI/MainWindow.cpp
     source/GUI/SessionList.cpp
+    source/GUI/SettingsDialog.cpp
     source/CaptureEngine.cpp
     source/LoopbackCapture.cpp
     source/AudioSessionLister.cpp

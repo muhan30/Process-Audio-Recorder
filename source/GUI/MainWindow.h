@@ -25,7 +25,6 @@ public:
 private:
     HINSTANCE m_hInst;
     HWND m_hWnd = nullptr;
-    HWND m_hStatusBar = nullptr;
 
     // 子控件
     SessionList m_sessionList;
@@ -34,12 +33,12 @@ private:
     HWND m_hStartBtn = nullptr;
     HWND m_hStopBtn = nullptr;
     HWND m_hSettingsBtn = nullptr;
-    HWND m_hSaveLink = nullptr;
     HWND m_hHintLabel = nullptr;
     HWND m_hTimerLabel = nullptr;
     HWND m_hSizeLabel = nullptr;
     HWND m_hSysLevel = nullptr;
     HWND m_hMicLevel = nullptr;
+    HWND m_hSaveLink = nullptr;
 
     // 引擎
     CaptureEngine m_engine;
@@ -64,6 +63,7 @@ private:
     void OnStart();
     void OnStop();
     void OnSettings();
-    void OnSaveLink();
     void UpdateStatus(const CaptureStatus& st);
+    void LoadSettings();
+    void SaveSettings();
 };

@@ -44,10 +44,13 @@ public:
     float GetSystemGain() const;
 
     // ---- 捕获控制 ----
-    // Start 异步返回，成功后通过 onStatus 定期推送状态，停止后通过 onStopped 通知
-    HRESULT Start(DWORD processId, bool includeProcessTree,
-                  StatusCallback onStatus, StoppedCallback onStopped);
-    HRESULT StartGlobal(StatusCallback onStatus, StoppedCallback onStopped);
+    // Start 异步返回。stop 后通过 onStopped 通知（PostMessage，线程安全）。
+    // 不传 onStatus（修复死锁：GUI 应从定时器主动拉 GetStatus()）。
+    HRESULT Start(DWORD processId, bool includeProcessTree, StoppedCallback onStopped);
+    HRESULT StartGlobal(StoppedCallback onStopped);
+
+    // 查询当前状态快照（GUI 定时器线程安全调用）
+    CaptureStatus GetStatus() const;
 
     // Stop 阻塞等待捕获线程完全退出
     void Stop();
