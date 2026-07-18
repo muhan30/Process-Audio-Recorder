@@ -2,6 +2,7 @@
 
 #include <mmdeviceapi.h>   // IMMDeviceEnumerator
 #include <audiopolicy.h>   // IAudioSessionManager2 / IAudioSessionControl2
+#include <endpointvolume.h>// IAudioMeterInformation
 #include <algorithm>
 
 #include <wil/com.h>
@@ -67,9 +68,14 @@ HRESULT ListAudioSessions(std::vector<AudioSessionInfo>& sessions)
         }
         info.isSystemSounds = (control2->IsSystemSoundsSession() == S_OK);
 
-        AudioSessionState state = AudioSessionStateInactive;
-        control->GetState(&state);
-        info.isActive = (state == AudioSessionStateActive);
+        // 用峰值电平判断是否真正在发声（比会话状态延迟小得多）
+        wil::com_ptr_nothrow<IAudioMeterInformation> meter;
+        info.peakValue = 0.0f;
+        if (SUCCEEDED(control->QueryInterface(__uuidof(IAudioMeterInformation), meter.put_void())))
+        {
+            meter->GetPeakValue(&info.peakValue);
+        }
+        info.isActive = (info.peakValue > 0.001f);  // 峰值 > 0 才是真在响
 
         info.processName = GetProcessNameByPid(info.processId);
         if (info.processName.empty())

@@ -33,3 +33,28 @@ target_link_libraries(ProcessAudioRecorder
     windowsapp
     userenv
 )
+
+# ---- GUI 产物 ----
+add_executable(ProcessAudioRecorderGUI WIN32
+    source/GUI/Main.cpp
+    source/GUI/MainWindow.cpp
+    source/GUI/SessionList.cpp
+    source/CaptureEngine.cpp
+    source/LoopbackCapture.cpp
+    source/AudioSessionLister.cpp
+    source/WavSink.cpp
+    source/M4aSink.cpp
+    source/MicCapture.cpp
+    source/AudioMixer.cpp
+)
+
+target_link_libraries(ProcessAudioRecorderGUI
+    mfplat
+    mfuuid
+    mmdevapi
+    mfreadwrite
+    windowsapp
+    userenv
+    comctl32
+    shell32
+)

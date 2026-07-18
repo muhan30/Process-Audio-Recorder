@@ -14,8 +14,9 @@ struct AudioSessionInfo
 {
     DWORD processId = 0;        // 进程 ID
     std::wstring processName;   // 进程 exe 名（不含路径）
-    bool isActive = false;      // true = 正在发声（AudioSessionStateActive）
+    bool isActive = false;      // true = 真正在发声（峰值 > 0，不用滞后状态）
     bool isSystemSounds = false;// true = 系统提示音会话
+    float peakValue = 0.0f;     // 实时峰值（0.0-1.0，0 = 静音）
 };
 
 // 枚举默认播放设备上的所有音频会话，正在发声的排前面
