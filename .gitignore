@@ -22,6 +22,7 @@ mono_crash.*
 .superpowers/
 recordings/
 icon-preview.html
+MEMORY.md
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
