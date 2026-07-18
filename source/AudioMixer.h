@@ -18,16 +18,23 @@ public:
     // 设置麦克风增益（1.0 = 原样，2.0 = 放大一倍；调用时机不限）
     void SetMicGain(float gain) { m_micGain = gain; }
 
+    // 设置系统声音增益（1.0 = 原样，对环回数据缩放后再混音或直通）
+    void SetSystemGain(float gain) { m_systemGain = gain; }
+
     // 麦克风数据入缓冲（麦克风采集线程调用）
     void PushMicData(const BYTE* data, DWORD size);
 
     // 用环回块驱动混音：取等量麦克风数据饱和叠加，返回混合块（环回回调线程调用）
     std::vector<BYTE> MixWithLoopback(std::vector<BYTE>&& loopbackChunk);
 
+    // 纯系统增益（麦克风未启用时的直通路径）
+    std::vector<BYTE> ApplySystemGain(std::vector<BYTE>&& chunk);
+
 private:
     std::deque<BYTE> m_micBuffer;         // 麦克风字节缓冲（16bit 立体声样本流）
     std::mutex m_mutex;                   // 缓冲锁（两线程并发访问）
-    std::atomic<float> m_micGain{ 1.0f }; // 麦克风增益系数
+    std::atomic<float> m_micGain{ 1.0f };   // 麦克风增益系数
+    std::atomic<float> m_systemGain{ 1.0f };// 系统声音增益系数
 
     // 水位上限：约 2 秒（44100 帧/秒 x 4 字节/帧 x 2 秒）
     static constexpr size_t kMaxBuffer = 44100 * 4 * 2;

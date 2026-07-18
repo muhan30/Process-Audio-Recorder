@@ -13,8 +13,34 @@ void AudioMixer::PushMicData(const BYTE* data, DWORD size)
     }
 }
 
+// 对 16bit PCM 块逐样本乘增益并饱和钳制（原地）
+static void ApplyGainInPlace(std::vector<BYTE>& chunk, float gain)
+{
+    if (gain == 1.0f)
+    {
+        return;
+    }
+    auto* samples = reinterpret_cast<INT16*>(chunk.data());
+    size_t count = chunk.size() / sizeof(INT16);
+    for (size_t i = 0; i < count; i++)
+    {
+        int v = static_cast<int>(static_cast<float>(samples[i]) * gain);
+        v = (std::max)(-32768, (std::min)(32767, v));
+        samples[i] = static_cast<INT16>(v);
+    }
+}
+
+std::vector<BYTE> AudioMixer::ApplySystemGain(std::vector<BYTE>&& chunk)
+{
+    ApplyGainInPlace(chunk, m_systemGain.load());
+    return std::move(chunk);
+}
+
 std::vector<BYTE> AudioMixer::MixWithLoopback(std::vector<BYTE>&& loopbackChunk)
 {
+    // 先对系统声道应用增益
+    ApplyGainInPlace(loopbackChunk, m_systemGain.load());
+
     // 取等量麦克风数据（不足部分保持为零 = 静音）
     std::vector<BYTE> micChunk(loopbackChunk.size(), 0);
     {
@@ -26,13 +52,13 @@ std::vector<BYTE> AudioMixer::MixWithLoopback(std::vector<BYTE>&& loopbackChunk)
     }
 
     // 逐样本饱和叠加（16bit 有符号；麦克风路先乘增益，钳制防爆音）
-    const float gain = m_micGain.load();
+    const float micGain = m_micGain.load();
     auto* dst = reinterpret_cast<INT16*>(loopbackChunk.data());
     auto* mic = reinterpret_cast<const INT16*>(micChunk.data());
     size_t samples = loopbackChunk.size() / sizeof(INT16);
     for (size_t i = 0; i < samples; i++)
     {
-        int boosted = static_cast<int>(static_cast<float>(mic[i]) * gain);
+        int boosted = static_cast<int>(static_cast<float>(mic[i]) * micGain);
         int mixed = static_cast<int>(dst[i]) + boosted;
         mixed = (std::max)(-32768, (std::min)(32767, mixed));
         dst[i] = static_cast<INT16>(mixed);

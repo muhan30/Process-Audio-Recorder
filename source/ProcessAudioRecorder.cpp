@@ -46,6 +46,7 @@ struct CommandLineArgs {
 	std::wstring format;  // 输出格式："m4a"（默认）或 "wav"
 	bool micEnabled = false;  // 是否混入麦克风
 	float micGain = 1.0f;     // 麦克风软件增益（1.0 = 原样）
+	float sysGain = 1.0f;     // 系统声音软件增益（1.0 = 原样）
 	bool isValid = false;
 	std::wstring errorMessage;
 };
@@ -134,6 +135,15 @@ CommandLineArgs ParseCommandLine(int argc, wchar_t* argv[]) {
 		}
 		args.micGain = static_cast<float>(gain);
 	}
+	if (params.find(L"sys-gain") != params.end()) {
+		double gain = std::wcstod(params[L"sys-gain"].c_str(), &endPtr);
+		if (endPtr == params[L"sys-gain"].c_str() || *endPtr != L'\0' || gain < 0.1 || gain > 8.0) {
+			args.errorMessage = L"Error: Invalid --sys-gain: " + params[L"sys-gain"] +
+				L"\nMust be a number between 0.1 and 8.0 (1.0 = original volume).";
+			return args;
+		}
+		args.sysGain = static_cast<float>(gain);
+	}
 
 	if (args.captureMode == 1 || args.captureMode == 2) {
 		if (params.find(L"pid") == params.end()) {
@@ -164,7 +174,8 @@ void usage() {
 		<< L"  --path <PATH>  Output file path (required)\n"
 		<< L"  --format <F>   Output format: m4a (default, compressed) or wav (lossless)\n"
 		<< L"  --mic <on|off> Mix your microphone into the recording (default off)\n"
-		<< L"  --mic-gain <G> Microphone volume boost, 0.1-8.0 (default 1.0, try 2 if too quiet)\n\n"
+		<< L"  --mic-gain <G> Microphone volume boost, 0.1-8.0 (default 1.0, try 3 if too quiet)\n"
+		<< L"  --sys-gain <G> System audio volume boost, 0.1-8.0 (default 1.0, try 2 if too quiet)\n\n"
 		<< L"Examples:\n"
 		<< L"  ProcessAudioRecorder --mode 0 --path C:\\system_audio.wav\n"
 		<< L"  ProcessAudioRecorder --pid 1234 --mode 1 --path C:\\record.wav\n"
@@ -314,14 +325,15 @@ int wmain(int argc, wchar_t* argv[]) {
 	LevelState levelState;
 	AudioMixer mixer;
 	MicCapture mic;
-	// 统一分流：先算系统声电平，再按麦克风开关决定混音或直通
+	// 统一分流：先算系统声电平，再按麦克风开关决定混音或直通（两路均走 AudioMixer 的增益）
+	mixer.SetSystemGain(args.sysGain);
 	loopbackCapture.SetDataTap([&](std::vector<BYTE>&& chunk) {
 		levelState.systemLevel = CalcPeakLevel(chunk.data(), static_cast<DWORD>(chunk.size()));
 		if (args.micEnabled) {
 			loopbackCapture.EnqueueAudioData(mixer.MixWithLoopback(std::move(chunk)));
 		}
 		else {
-			loopbackCapture.EnqueueAudioData(std::move(chunk));
+			loopbackCapture.EnqueueAudioData(mixer.ApplySystemGain(std::move(chunk)));
 		}
 		});
 	if (args.micEnabled) {
