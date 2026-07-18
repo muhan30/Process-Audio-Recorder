@@ -21,6 +21,10 @@ public:
     // 设置系统声音增益（1.0 = 原样，对环回数据缩放后再混音或直通）
     void SetSystemGain(float gain) { m_systemGain = gain; }
 
+    // 查询当前增益值（供 GUI 设置对话框初始化）
+    float GetMicGain() const { return m_micGain.load(); }
+    float GetSystemGain() const { return m_systemGain.load(); }
+
     // 麦克风数据入缓冲（麦克风采集线程调用）
     void PushMicData(const BYTE* data, DWORD size);
 

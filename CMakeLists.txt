@@ -21,6 +21,7 @@ add_executable(ProcessAudioRecorder
     source/M4aSink.cpp
     source/MicCapture.cpp
     source/AudioMixer.cpp
+    source/CaptureEngine.cpp
 )
 
 # 强制链接原版项目所依赖的 Windows 底层音频与媒体库
