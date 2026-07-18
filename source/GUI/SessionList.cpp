@@ -28,10 +28,14 @@ void SessionList::Create(HWND parent, HINSTANCE hInst, int x, int y, int w, int 
 
 void SessionList::Refresh()
 {
+    // 保存当前选中 PID，刷新后恢复
+    int selectedPid = GetSelectedPid();
+
     ListView_DeleteAllItems(m_hWnd);
     m_sessions.clear();
     ListAudioSessions(m_sessions);
 
+    int restoreIndex = -1;
     for (size_t i = 0; i < m_sessions.size(); i++)
     {
         const auto& s = m_sessions[i];
@@ -47,6 +51,16 @@ void SessionList::Refresh()
         ListView_SetItemText(m_hWnd, (int)i, 1, const_cast<LPWSTR>(s.processName.c_str()));
         ListView_SetItemText(m_hWnd, (int)i, 2,
             const_cast<LPWSTR>(s.isActive ? L"<<< 正在发声" : L"安静"));
+
+        if (s.processId == (DWORD)selectedPid)
+            restoreIndex = (int)i;
+    }
+
+    // 恢复选中
+    if (restoreIndex >= 0)
+    {
+        ListView_SetItemState(m_hWnd, restoreIndex, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+        ListView_EnsureVisible(m_hWnd, restoreIndex, FALSE);
     }
 }
 

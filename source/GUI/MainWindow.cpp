@@ -2,6 +2,7 @@
 #include <CommCtrl.h>
 #include <sstream>
 #include <iomanip>
+#include <ctime>
 
 // 窗口类名
 static const WCHAR* WND_CLASS = L"AudioRecorderMainWindow";
@@ -225,10 +226,19 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         ShowWindow(m_hWnd, SW_HIDE);
         return 0;
 
+    case WM_USER_RECORDING_STOPPED:
+        KillTimer(m_hWnd, 1);
+        ShowIdleState();
+        return 0;
+
     case WM_TIMER:
-        if (wp == 2)
+        if (wp == 1)
         {
-            // 空闲态+录音态都刷新列表（录音中也需要看到最新状态）
+            // 录音中更新电平（从 CaptureEngine 的 onStatus 回调里已经推了，这里只做重绘）
+        }
+        else if (wp == 2)
+        {
+            // 空闲态+录音态都刷新列表
             OnRefresh();
         }
         return 0;
@@ -294,15 +304,67 @@ void MainWindow::OnRefresh()
 
 void MainWindow::OnStart()
 {
-    // Task 3 实现
+    // 获取选中的 PID——必须先在列表里点一下要录的软件
+    int pid = m_sessionList.GetSelectedPid();
+    if (pid == 0)
+    {
+        MessageBox(m_hWnd, L"请先在列表里点一下要录音的软件（比如微信），再点开始录音。", L"提示", MB_OK);
+        return;
+    }
+    // 配置引擎
+    m_engine.SetMicEnabled(m_micEnabled);
+    m_engine.SetMicGain(m_micGain);
+    m_engine.SetSystemGain(m_sysGain);
+
+    // 确保 recordings 目录存在（解决双击打开时工作目录不是项目根的问题）
+    WCHAR exeDir[MAX_PATH];
+    GetModuleFileName(nullptr, exeDir, MAX_PATH);
+    WCHAR* lastSlash = wcsrchr(exeDir, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    std::wstring recDir = std::wstring(exeDir) + L"\\recordings";
+    CreateDirectory(recDir.c_str(), nullptr);  // 已存在无害
+
+    auto t = std::time(nullptr);
+    tm localTime;
+    localtime_s(&localTime, &t);
+    WCHAR name[128];
+    // 取目标进程名用于文件名
+    std::wstring procName = L"系统混音";
+    for (const auto& s : m_sessionList.GetCurrentSessions())
+    {
+        if (s.processId == (DWORD)pid) { procName = s.processName; break; }
+    }
+    wsprintfW(name, L"%04d-%02d-%02d %s %02d-%02d-%02d.m4a",
+        localTime.tm_year + 1900, localTime.tm_mon + 1, localTime.tm_mday,
+        procName.c_str(),
+        localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
+    std::wstring path = recDir + L"\\" + std::wstring(name);
+    m_engine.SetOutputPath(path);
+    m_engine.SetOutputFormat(L"m4a");
+
+    // 带状态的异步启动
+    HRESULT hr = m_engine.Start(pid, true,
+        [this](const CaptureStatus& st) { UpdateStatus(st); },
+        [this](HRESULT) { PostMessage(m_hWnd, WM_USER_RECORDING_STOPPED, 0, 0); });
+
+    if (FAILED(hr))
+    {
+        WCHAR msg[256];
+        wsprintfW(msg, L"启动录音失败。\n错误码: 0x%08X\n目标 PID: %d\n\n请检查：\n"
+            L"1. 是否在列表里选中了正在发声的软件？\n"
+            L"2. 音频设备（扬声器/耳机）是否正常工作？",
+            hr, pid);
+        MessageBox(m_hWnd, msg, L"错误", MB_ICONERROR);
+        return;
+    }
     ShowRecordingState();
     SetTimer(m_hWnd, 1, 200, nullptr);
 }
 
 void MainWindow::OnStop()
 {
-    // Task 3 实现
     KillTimer(m_hWnd, 1);
+    m_engine.Stop();
     ShowIdleState();
 }
 
@@ -316,4 +378,39 @@ void MainWindow::OnSaveLink()
 {
     // 打开保存目录
     ShellExecute(m_hWnd, L"open", m_outputPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// ---- 电平绘制 ----
+static std::wstring DrawLevelBar(int level)
+{
+    std::wstring bar;
+    int filled = (level + 9) / 10;
+    for (int i = 0; i < 10; i++)
+        bar += (i < filled) ? L'#' : L'-';
+    return bar;
+}
+
+void MainWindow::UpdateStatus(const CaptureStatus& st)
+{
+    auto secs = st.elapsed.count();
+    WCHAR buf[64];
+    wsprintfW(buf, L"%02d:%02d:%02d", (int)(secs / 3600), (int)((secs % 3600) / 60), (int)(secs % 60));
+    SetWindowText(m_hTimerLabel, buf);
+
+    std::wstring sysText = L"系统声音 [" + DrawLevelBar(st.systemLevel) + L"]";
+    SetWindowText(m_hSysLevel, sysText.c_str());
+
+    if (st.micEnabled)
+    {
+        std::wstring micText = L"麦克风 [" + DrawLevelBar(st.micLevel) + L"]";
+        SetWindowText(m_hMicLevel, micText.c_str());
+    }
+
+    // 文件大小
+    UINT64 bytes = st.bytesWritten;
+    if (bytes < 1024 * 1024)
+        wsprintfW(buf, L"文件大小: %u KB", (UINT)(bytes / 1024));
+    else
+        wsprintfW(buf, L"文件大小: %.1f MB", bytes / (1024.0 * 1024.0));
+    SetWindowText(m_hSizeLabel, buf);
 }
