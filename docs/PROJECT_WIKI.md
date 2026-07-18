@@ -22,7 +22,7 @@
 
 | Remote | 地址 | 用途 |
 |--------|------|------|
-| `origin` | https://github.com/muhan30/My_AudioLoopbackRecorder.git | 自己的仓库，日常 push |
+| `origin` | https://github.com/muhan30/Process-Audio-Recorder.git | 自己的仓库，日常 push |
 | `upstream` | https://github.com/CingZeoi/AudioLoopbackRecorder.git | 原作者仓库，只读，`git fetch upstream` 同步更新 |
 
 分支：`main`（单分支开发）。

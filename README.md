@@ -18,7 +18,7 @@ A Windows desktop recording tool based on [CingZeoi/AudioLoopbackRecorder](https
 
 ### Download
 
-Download the latest version from **[GitHub Releases](https://github.com/muhan30/My_AudioLoopbackRecorder/releases)** (685 KB, single file, no installation required).
+Download the latest version from **[GitHub Releases](https://github.com/muhan30/Process-Audio-Recorder/releases)** (685 KB, single file, no installation required).
 
 ### Quick Start
 
@@ -70,7 +70,7 @@ Full options: `--pid` / `--mode` (0=global, 1=include, 2=exclude) / `--mic on|of
 
 ### 下载
 
-从 **[GitHub Releases](https://github.com/muhan30/My_AudioLoopbackRecorder/releases)** 下载最新版本（685 KB，单文件，无需安装）。
+从 **[GitHub Releases](https://github.com/muhan30/Process-Audio-Recorder/releases)** 下载最新版本（685 KB，单文件，无需安装）。
 
 ### 怎么用
 
