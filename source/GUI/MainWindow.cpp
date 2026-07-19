@@ -290,6 +290,9 @@ void MainWindow::OnStart()
     m_engine.SetMicGain(m_micGain);
     m_engine.SetSystemGain(m_sysGain);
     m_engine.SetLowpassCutoff(m_lowpassCutoff * 1000.0f);  // kHz → Hz
+    // 强度 0-10 → dBFS: 0=off, 1→-65, 5→-45, 10→-20
+    float gateDBFS = (m_noiseGateStrength > 0.01f) ? -(70.0f - m_noiseGateStrength * 5.0f) : 0.0f;
+    m_engine.SetNoiseGateThreshold(gateDBFS);
 
     // Build recordings directory next to exe
     WCHAR exeDir[MAX_PATH];
@@ -305,12 +308,20 @@ void MainWindow::OnStart()
     std::wstring procName = L"系统混音";
     for (const auto& s : m_sessionList.GetCurrentSessions())
         if (s.processId == (DWORD)pid) { procName = s.processName; break; }
+
+    // 按软件名分子文件夹：recordings/微信/（去掉 .exe 后缀）
+    std::wstring folderName = procName;
+    if (folderName.size() > 4 && _wcsicmp(folderName.c_str() + folderName.size() - 4, L".exe") == 0)
+        folderName.resize(folderName.size() - 4);
+    std::wstring appDir = recDir + L"\\" + folderName;
+    CreateDirectory(appDir.c_str(), nullptr);
+
     WCHAR name[128];
     wsprintfW(name, L"%04d-%02d-%02d %s %02d-%02d-%02d.%s",
         localTime.tm_year + 1900, localTime.tm_mon + 1, localTime.tm_mday,
         procName.c_str(), localTime.tm_hour, localTime.tm_min, localTime.tm_sec,
         m_outputFormat.c_str());
-    std::wstring path = recDir + L"\\" + std::wstring(name);
+    std::wstring path = appDir + L"\\" + std::wstring(name);
     m_engine.SetOutputPath(path);
     m_engine.SetOutputFormat(m_outputFormat);
     GetSystemTime(&m_recordingStartST);
@@ -345,12 +356,14 @@ void MainWindow::OnSettings()
     cfg.sysGain = m_sysGain;
     cfg.micGain = m_micGain;
     cfg.lowpassCutoff = m_lowpassCutoff;
+    cfg.noiseGateStrength = m_noiseGateStrength;
     if (SettingsDialog::Show(m_hWnd, m_hInst, cfg))
     {
         m_outputFormat = cfg.outputFormat;
         m_sysGain = cfg.sysGain;
         m_micGain = cfg.micGain;
         m_lowpassCutoff = cfg.lowpassCutoff;
+        m_noiseGateStrength = cfg.noiseGateStrength;
         SaveSettings();
     }
 }
@@ -364,6 +377,7 @@ void MainWindow::LoadSettings()
     m_sysGain = cfg.sysGain;
     m_micGain = cfg.micGain;
     m_lowpassCutoff = cfg.lowpassCutoff;
+    m_noiseGateStrength = cfg.noiseGateStrength;
 }
 
 void MainWindow::SaveSettings()
@@ -374,6 +388,7 @@ void MainWindow::SaveSettings()
     cfg.sysGain = m_sysGain;
     cfg.micGain = m_micGain;
     cfg.lowpassCutoff = m_lowpassCutoff;
+    cfg.noiseGateStrength = m_noiseGateStrength;
     SettingsDialog::SaveToIni(cfg);
 }
 

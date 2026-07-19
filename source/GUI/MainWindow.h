@@ -53,6 +53,7 @@ private:
     float m_sysGain = 2.0f;
     float m_micGain = 4.0f;
     float m_lowpassCutoff = 10.0f;  // kHz, 0 = 关闭
+    float m_noiseGateStrength = 5.0f;  // 0-10, 0 = 关闭
     bool m_isRecording = false;
     SYSTEMTIME m_recordingStartST = {};
     std::wstring m_lastRecordingPath;

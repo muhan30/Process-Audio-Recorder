@@ -43,6 +43,9 @@ public:
     // 设置低通滤波器截止频率（Hz），0 = 关闭直通
     void SetLowpassCutoff(float fcHz);
 
+    // 设置噪声门阈值（dBFS），0 = 关闭。典型值 -45（桌面麦克风），-60 极安静，-20 嘈杂。
+    void SetNoiseGateThreshold(float dBFS);
+
     // 查询当前增益值（供 GUI 设置对话框初始化）
     float GetMicGain() const { return m_micGain.load(); }
     float GetSystemGain() const { return m_systemGain.load(); }
@@ -63,6 +66,7 @@ private:
     std::atomic<float> m_systemGain{ 1.0f };// 系统声音增益系数
     BiquadStereo m_filter;                   // 低通滤波器（系数+状态）
     std::atomic<float> m_lowpassCutoff{ 0 }; // 截止频率 Hz，0=关闭直通
+    std::atomic<float> m_noiseGateThreshold{ 0 }; // 噪声门阈值 dBFS，0=关闭
 
     // 水位上限：约 2 秒（44100 帧/秒 x 4 字节/帧 x 2 秒）
     static constexpr size_t kMaxBuffer = 44100 * 4 * 2;

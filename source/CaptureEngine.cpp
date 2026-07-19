@@ -43,6 +43,7 @@ void CaptureEngine::SetMicEnabled(bool enabled)                { m_impl->micEnab
 void CaptureEngine::SetMicGain(float gain)                     { m_impl->mixer.SetMicGain(gain); }
 void CaptureEngine::SetSystemGain(float gain)                  { m_impl->mixer.SetSystemGain(gain); }
 void CaptureEngine::SetLowpassCutoff(float fcHz)                { m_impl->mixer.SetLowpassCutoff(fcHz); }
+void CaptureEngine::SetNoiseGateThreshold(float dBFS)            { m_impl->mixer.SetNoiseGateThreshold(dBFS); }
 float CaptureEngine::GetMicGain() const                        { return m_impl->mixer.GetMicGain(); }
 float CaptureEngine::GetSystemGain() const                     { return m_impl->mixer.GetSystemGain(); }
 

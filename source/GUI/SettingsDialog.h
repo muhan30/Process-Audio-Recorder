@@ -21,6 +21,7 @@ struct SettingsData
     float sysGain = 2.0f;
     float micGain = 4.0f;
     float lowpassCutoff = 10.0f;  // kHz, 0 = 关闭低通滤波
+    float noiseGateStrength = 5.0f;  // 0-10 降噪强度, 0=关闭
 };
 
 class SettingsDialog

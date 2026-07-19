@@ -39,6 +39,7 @@ public:
     void SetMicGain(float gain);
     void SetSystemGain(float gain);
     void SetLowpassCutoff(float fcHz);  // 麦克风低通滤波截止频率 Hz，0=关闭
+    void SetNoiseGateThreshold(float dBFS);  // 噪声门阈值 dBFS，0=关闭
 
     // ---- 查询当前增益（供设置对话框初始化） ----
     float GetMicGain() const;

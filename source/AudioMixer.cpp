@@ -85,6 +85,11 @@ void AudioMixer::SetLowpassCutoff(float fcHz)
     m_lowpassCutoff = fcHz;
 }
 
+void AudioMixer::SetNoiseGateThreshold(float dBFS)
+{
+    m_noiseGateThreshold = dBFS;
+}
+
 void AudioMixer::PushMicData(const BYTE* data, DWORD size)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -132,6 +137,28 @@ std::vector<BYTE> AudioMixer::MixWithLoopback(std::vector<BYTE>&& loopbackChunk)
         take -= take % 4;  // 对齐到立体声帧边界（2 声道 x 2 字节），防左右声道错位
         std::copy(m_micBuffer.begin(), m_micBuffer.begin() + take, micChunk.begin());
         m_micBuffer.erase(m_micBuffer.begin(), m_micBuffer.begin() + take);
+    }
+
+    // 噪声门：不说话时麦克风信号整块置零，消除全频段底噪
+    float gateThreshold = m_noiseGateThreshold.load();
+    if (gateThreshold < 0.0f)  // 负值 = 启用，0 = 关闭
+    {
+        auto* micSamples = reinterpret_cast<const INT16*>(micChunk.data());
+        size_t sampleCount = micChunk.size() / sizeof(INT16);
+        float sumSq = 0.0f;
+        for (size_t i = 0; i < sampleCount; i++)
+        {
+            float s = static_cast<float>(micSamples[i]);
+            sumSq += s * s;
+        }
+        float rms = sqrtf(sumSq / static_cast<float>(sampleCount));
+        // RMS → dBFS：20*log10(rms/32768)，rms≈0 时 dBFS→-∞
+        float dbfs = (rms > 0.5f) ? 20.0f * log10f(rms / 32768.0f) : -100.0f;
+        if (dbfs < gateThreshold)
+        {
+            // 低于阈值 → 整块静音，跳过混音（滤波和增益都不需要）
+            std::fill(micChunk.begin(), micChunk.end(), static_cast<BYTE>(0));
+        }
     }
 
     // 低通滤波：滤除麦克风高频噪声（电流嘶声）

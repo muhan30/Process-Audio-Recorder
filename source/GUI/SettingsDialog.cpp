@@ -2,7 +2,7 @@
 #include <CommCtrl.h>
 
 static SettingsData* g_pData = nullptr;
-static HWND g_hSysEdit, g_hMicEdit, g_hLowpassEdit;
+static HWND g_hSysEdit, g_hMicEdit, g_hLowpassEdit, g_hNoiseGateEdit;
 static bool g_result = false;
 
 void SettingsDialog::LoadFromIni(SettingsData& data)
@@ -21,6 +21,11 @@ void SettingsDialog::LoadFromIni(SettingsData& data)
     data.sysGain = (float)GetPrivateProfileInt(L"Settings", L"SysGain", 20, iniPath.c_str()) / 10.0f;
     data.micGain = (float)GetPrivateProfileInt(L"Settings", L"MicGain", 40, iniPath.c_str()) / 10.0f;
     data.lowpassCutoff = (float)GetPrivateProfileInt(L"Settings", L"LowpassCutoff", 100, iniPath.c_str()) / 10.0f;
+    int ng = GetPrivateProfileInt(L"Settings", L"NoiseGate", 50, iniPath.c_str());
+    float rawStrength = (float)ng / 10.0f;
+    // 旧格式兼容：旧版存的是 |dBFS|×10（如 450→-45），值远超 10
+    if (rawStrength > 10.0f) rawStrength = 5.0f;
+    data.noiseGateStrength = rawStrength;
 }
 
 void SettingsDialog::SaveToIni(const SettingsData& data)
@@ -40,6 +45,8 @@ void SettingsDialog::SaveToIni(const SettingsData& data)
     WritePrivateProfileString(L"Settings", L"MicGain", buf, iniPath.c_str());
     wsprintfW(buf, L"%d", (int)(data.lowpassCutoff * 10));
     WritePrivateProfileString(L"Settings", L"LowpassCutoff", buf, iniPath.c_str());
+    wsprintfW(buf, L"%d", (int)(data.noiseGateStrength * 10));
+    WritePrivateProfileString(L"Settings", L"NoiseGate", buf, iniPath.c_str());
 }
 
 static bool ParseLowpass(HWND edit, float& out)
@@ -50,6 +57,18 @@ static bool ParseLowpass(HWND edit, float& out)
     double v = wcstod(buf, &end);
     while (end && (*end == L' ' || *end == L'\t')) end++;  // 跳过尾部空白
     if (end == buf || *end != L'\0' || v < 0.0 || v > 20.0) return false;
+    out = (float)v;
+    return true;
+}
+
+static bool ParseNoiseGate(HWND edit, float& out)
+{
+    WCHAR buf[32];
+    GetWindowText(edit, buf, 32);
+    WCHAR* end = nullptr;
+    double v = wcstod(buf, &end);
+    while (end && (*end == L' ' || *end == L'\t')) end++;
+    if (end == buf || *end != L'\0' || v < 0.0 || v > 10.0) return false;
     out = (float)v;
     return true;
 }
@@ -81,45 +100,56 @@ static LRESULT CALLBACK DlgWndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
 
         // 系统声音增益
         CreateWindow(WC_STATIC, L"系统声音增益 (0.1-8.0)", WS_CHILD | WS_VISIBLE | SS_LEFT,
-            14, y + 5, 200, 22, hWnd, nullptr, hi, nullptr);
+            14, y + 5, 220, 22, hWnd, nullptr, hi, nullptr);
         WCHAR buf[32];
         swprintf_s(buf, L"%.1f", g_pData->sysGain);
         g_hSysEdit = CreateWindow(WC_EDIT, buf, WS_CHILD | WS_VISIBLE | WS_BORDER,
-            220, y, 60, 26, hWnd, nullptr, hi, nullptr);
+            240, y, 60, 26, hWnd, nullptr, hi, nullptr);
         SendMessage(g_hSysEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-        CreateWindow(WC_STATIC, L"x（1.0=原音量）", WS_CHILD | WS_VISIBLE | SS_LEFT,
-            290, y + 5, 130, 22, hWnd, nullptr, hi, nullptr);
+        CreateWindow(WC_STATIC, L"（范围 0.1-8.0）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+            310, y + 5, 150, 22, hWnd, nullptr, hi, nullptr);
 
         // 麦克风增益
         y += 38;
         CreateWindow(WC_STATIC, L"麦克风增益 (0.1-8.0)", WS_CHILD | WS_VISIBLE | SS_LEFT,
-            14, y + 5, 200, 22, hWnd, nullptr, hi, nullptr);
+            14, y + 5, 220, 22, hWnd, nullptr, hi, nullptr);
         swprintf_s(buf, L"%.1f", g_pData->micGain);
         g_hMicEdit = CreateWindow(WC_EDIT, buf, WS_CHILD | WS_VISIBLE | WS_BORDER,
-            220, y, 60, 26, hWnd, nullptr, hi, nullptr);
+            240, y, 60, 26, hWnd, nullptr, hi, nullptr);
         SendMessage(g_hMicEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-        CreateWindow(WC_STATIC, L"x（1.0=原音量）", WS_CHILD | WS_VISIBLE | SS_LEFT,
-            290, y + 5, 130, 22, hWnd, nullptr, hi, nullptr);
+        CreateWindow(WC_STATIC, L"（范围 0.1-8.0）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+            310, y + 5, 150, 22, hWnd, nullptr, hi, nullptr);
 
         // 低通滤波截止频率
         y += 38;
         CreateWindow(WC_STATIC, L"低通滤波 (kHz), 0=关闭", WS_CHILD | WS_VISIBLE | SS_LEFT,
-            14, y + 5, 200, 22, hWnd, nullptr, hi, nullptr);
+            14, y + 5, 220, 22, hWnd, nullptr, hi, nullptr);
         swprintf_s(buf, L"%.1f", g_pData->lowpassCutoff);
         g_hLowpassEdit = CreateWindow(WC_EDIT, buf, WS_CHILD | WS_VISIBLE | WS_BORDER,
-            220, y, 60, 26, hWnd, nullptr, hi, nullptr);
+            240, y, 60, 26, hWnd, nullptr, hi, nullptr);
         SendMessage(g_hLowpassEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
-        CreateWindow(WC_STATIC, L"kHz（10=默认）", WS_CHILD | WS_VISIBLE | SS_LEFT,
-            290, y + 5, 150, 22, hWnd, nullptr, hi, nullptr);
+        CreateWindow(WC_STATIC, L"（范围 0.0-20.0 kHz）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+            310, y + 5, 150, 22, hWnd, nullptr, hi, nullptr);
+
+        // 噪声门强度
+        y += 38;
+        CreateWindow(WC_STATIC, L"降噪强度 (0=关闭, 10=最强)", WS_CHILD | WS_VISIBLE | SS_LEFT,
+            14, y + 5, 220, 22, hWnd, nullptr, hi, nullptr);
+        swprintf_s(buf, L"%.1f", g_pData->noiseGateStrength);
+        g_hNoiseGateEdit = CreateWindow(WC_EDIT, buf, WS_CHILD | WS_VISIBLE | WS_BORDER,
+            240, y, 60, 26, hWnd, nullptr, hi, nullptr);
+        SendMessage(g_hNoiseGateEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+        CreateWindow(WC_STATIC, L"（范围 0.0-10.0）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+            310, y + 5, 130, 22, hWnd, nullptr, hi, nullptr);
 
         // 输出格式
         y += 46;
         CreateWindow(WC_STATIC, L"输出格式", WS_CHILD | WS_VISIBLE | SS_LEFT,
             14, y + 4, 90, 22, hWnd, nullptr, hi, nullptr);
         HWND rM4a = CreateWindow(WC_BUTTON, L"M4A 压缩", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-            110, y, 100, 22, hWnd, (HMENU)(UINT_PTR)IDC_FMT_M4A, hi, nullptr);
+            120, y, 100, 22, hWnd, (HMENU)(UINT_PTR)IDC_FMT_M4A, hi, nullptr);
         HWND rWav = CreateWindow(WC_BUTTON, L"WAV 无损", WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON,
-            220, y, 100, 22, hWnd, (HMENU)(UINT_PTR)IDC_FMT_WAV, hi, nullptr);
+            240, y, 100, 22, hWnd, (HMENU)(UINT_PTR)IDC_FMT_WAV, hi, nullptr);
         SendMessage(rM4a, WM_SETFONT, (WPARAM)hFont, TRUE);
         SendMessage(rWav, WM_SETFONT, (WPARAM)hFont, TRUE);
         SendMessage(g_pData->outputFormat == L"wav" ? rWav : rM4a, BM_SETCHECK, BST_CHECKED, 0);
@@ -127,9 +157,9 @@ static LRESULT CALLBACK DlgWndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
         // 按钮
         y += 42;
         CreateWindow(WC_BUTTON, L"确定", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            120, y, 80, 28, hWnd, (HMENU)(UINT_PTR)IDC_SETTINGS_OK, hi, nullptr);
+            140, y, 80, 28, hWnd, (HMENU)(UINT_PTR)IDC_SETTINGS_OK, hi, nullptr);
         CreateWindow(WC_BUTTON, L"取消", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-            220, y, 80, 28, hWnd, (HMENU)(UINT_PTR)IDC_SETTINGS_CANCEL, hi, nullptr);
+            240, y, 80, 28, hWnd, (HMENU)(UINT_PTR)IDC_SETTINGS_CANCEL, hi, nullptr);
 
         return 0;
     }
@@ -137,11 +167,15 @@ static LRESULT CALLBACK DlgWndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_COMMAND:
         if (LOWORD(wp) == IDC_SETTINGS_OK) {
             if (!ParseGain(g_hSysEdit, g_pData->sysGain) || !ParseGain(g_hMicEdit, g_pData->micGain)) {
-                MessageBox(hWnd, L"增益值无效，请输入 0.1 至 8.0 之间的数字。", L"输入错误", MB_ICONWARNING);
+                MessageBox(hWnd, L"增益值无效。请输入 0.1 ~ 8.0 之间的数字。", L"输入错误 [范围: 0.1-8.0]", MB_ICONWARNING);
                 return 0;
             }
             if (!ParseLowpass(g_hLowpassEdit, g_pData->lowpassCutoff)) {
-                MessageBox(hWnd, L"低通滤波值无效，请输入 0.0 至 20.0 之间的数字（0=关闭）。", L"输入错误", MB_ICONWARNING);
+                MessageBox(hWnd, L"低通滤波值无效。请输入 0.0 ~ 20.0 kHz 之间的数字（0=关闭）。", L"输入错误 [范围: 0.0-20.0]", MB_ICONWARNING);
+                return 0;
+            }
+            if (!ParseNoiseGate(g_hNoiseGateEdit, g_pData->noiseGateStrength)) {
+                MessageBox(hWnd, L"降噪强度无效。请输入 0.0 ~ 10.0 之间的数字（0=关闭, 10=最强）。", L"输入错误 [范围: 0.0-10.0]", MB_ICONWARNING);
                 return 0;
             }
             g_pData->outputFormat = (SendDlgItemMessage(hWnd, IDC_FMT_M4A, BM_GETCHECK, 0, 0) == BST_CHECKED) ? L"m4a" : L"wav";
@@ -182,9 +216,9 @@ bool SettingsDialog::Show(HWND parent, HINSTANCE hInst, SettingsData& data)
     wc.lpszClassName = L"SettingsDlgWnd";
     RegisterClassExW(&wc);
 
-    HWND hWnd = CreateWindowEx(WS_EX_DLGMODALFRAME, L"SettingsDlgWnd", L"设置",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        0, 0, 440, 260, parent, nullptr, hInst, nullptr);
+    HWND hWnd = CreateWindowEx(WS_EX_DLGMODALFRAME | WS_EX_COMPOSITED, L"SettingsDlgWnd", L"设置",
+        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE | WS_CLIPCHILDREN,
+        0, 0, 480, 300, parent, nullptr, hInst, nullptr);
     if (!hWnd) return false;
 
     RECT pr, dr;
