@@ -42,6 +42,7 @@ void CaptureEngine::SetOutputFormat(const std::wstring& fmt)   { m_impl->outputF
 void CaptureEngine::SetMicEnabled(bool enabled)                { m_impl->micEnabled = enabled; }
 void CaptureEngine::SetMicGain(float gain)                     { m_impl->mixer.SetMicGain(gain); }
 void CaptureEngine::SetSystemGain(float gain)                  { m_impl->mixer.SetSystemGain(gain); }
+void CaptureEngine::SetLowpassCutoff(float fcHz)                { m_impl->mixer.SetLowpassCutoff(fcHz); }
 float CaptureEngine::GetMicGain() const                        { return m_impl->mixer.GetMicGain(); }
 float CaptureEngine::GetSystemGain() const                     { return m_impl->mixer.GetSystemGain(); }
 

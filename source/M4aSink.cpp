@@ -2,6 +2,7 @@
 
 #include <mfapi.h>
 #include <wil/result.h>
+#include <sys/stat.h>
 
 M4aSink::~M4aSink()
 {
@@ -14,6 +15,7 @@ HRESULT M4aSink::Initialize(PCWSTR filePath, const WAVEFORMATEX& format)
     RETURN_IF_FAILED(MFStartup(MF_VERSION));
     m_mfStarted = true;
     m_avgBytesPerSec = format.nAvgBytesPerSec;
+    m_filePath = filePath;
 
     // fMP4 容器：分段写入，进程意外终止时文件仍可播放到中断点（崩溃保护）
     wil::com_ptr_nothrow<IMFAttributes> attrs;
@@ -79,6 +81,19 @@ HRESULT M4aSink::WriteChunk(const BYTE* data, DWORD size)
     RETURN_IF_FAILED(m_writer->WriteSample(m_streamIndex, sample.get()));
     m_cbPcmWritten += size;
     return S_OK;
+}
+
+UINT64 M4aSink::BytesWritten() const
+{
+    // M4A 是压缩格式，PCM 输入量 ≠ 磁盘文件大小。优先读磁盘实际大小。
+    if (m_filePath.empty()) return 0;
+    struct __stat64 st;
+    if (_wstat64(m_filePath.c_str(), &st) == 0 && st.st_size > 0)
+        return static_cast<UINT64>(st.st_size);
+    // stat 失败或文件尚未刷盘时，用 PCM 输入量 × 压缩比估算（AAC 128kbps ≈ 16000/avgBytesPerSec）
+    if (m_avgBytesPerSec > 0)
+        return static_cast<UINT64>(static_cast<double>(m_cbPcmWritten) * 16000.0 / m_avgBytesPerSec);
+    return m_cbPcmWritten;  // 最终 fallback
 }
 
 HRESULT M4aSink::Finalize()

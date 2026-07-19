@@ -9,6 +9,7 @@
 #include <mfidl.h>
 #include <mfreadwrite.h>
 #include <wil/com.h>
+#include <string>
 
 class M4aSink : public AudioSink
 {
@@ -17,13 +18,14 @@ public:
     HRESULT Initialize(PCWSTR filePath, const WAVEFORMATEX& format) override;
     HRESULT WriteChunk(const BYTE* data, DWORD size) override;
     HRESULT Finalize() override;
-    UINT64 BytesWritten() const override { return m_cbPcmWritten; }
+    UINT64 BytesWritten() const override;  // 读磁盘实际文件大小（非 PCM 输入量）
 
 private:
     wil::com_ptr_nothrow<IMFSinkWriter> m_writer;  // MF 写入器（含编码）
     DWORD m_streamIndex = 0;      // 音频流索引
     UINT64 m_cbPcmWritten = 0;    // 已送入编码器的 PCM 字节数
     DWORD m_avgBytesPerSec = 0;   // PCM 每秒字节数（时间戳换算用）
+    std::wstring m_filePath;      // 输出文件路径（BytesWritten 读磁盘用）
     bool m_mfStarted = false;     // MFStartup 配对标志
     bool m_finalized = false;     // 防止重复收尾
 };

@@ -1,6 +1,89 @@
 #include "AudioMixer.h"
 
 #include <algorithm>
+#include <cmath>
+
+// ---- BiquadStereo ----
+
+void AudioMixer::BiquadStereo::SetCutoff(float fcHz, float sampleRate)
+{
+    Reset();  // 改截止频率必须清状态，否则旧状态可能引发振荡
+
+    if (fcHz <= 0.0f || fcHz >= sampleRate * 0.49f)
+    {
+        // 直通：y[n] = x[n]
+        b0 = 1.0f; b1 = 0.0f; b2 = 0.0f; a1 = 0.0f; a2 = 0.0f;
+        return;
+    }
+
+    constexpr float PI = 3.14159265f;
+    constexpr float Q = 0.70710678f;  // 1/sqrt(2)，巴特沃斯最平坦响应
+
+    float omega = 2.0f * PI * fcHz / sampleRate;
+    float cosW = cosf(omega);
+    float sinW = sinf(omega);
+    float alpha = sinW / (2.0f * Q);
+
+    // Bilinear transform → 未归一化系数
+    float b0_raw = (1.0f - cosW) * 0.5f;
+    float b1_raw = 1.0f - cosW;
+    float b2_raw = (1.0f - cosW) * 0.5f;
+    float a0_raw = 1.0f + alpha;
+    float a1_raw = -2.0f * cosW;
+    float a2_raw = 1.0f - alpha;
+
+    // 归一化
+    b0 = b0_raw / a0_raw;
+    b1 = b1_raw / a0_raw;
+    b2 = b2_raw / a0_raw;
+    a1 = a1_raw / a0_raw;
+    a2 = a2_raw / a0_raw;
+}
+
+void AudioMixer::BiquadStereo::Process(INT16* samples, size_t count)
+{
+    // 直通时跳过（零开销）
+    if (b0 == 1.0f && b1 == 0.0f && b2 == 0.0f && a1 == 0.0f && a2 == 0.0f)
+        return;
+
+    for (size_t i = 0; i < count; i += 2)
+    {
+        float xL = static_cast<float>(samples[i]);
+        float xR = static_cast<float>(samples[i + 1]);
+
+        float yL = b0 * xL + b1 * x1L + b2 * x2L - a1 * y1L - a2 * y2L;
+        float yR = b0 * xR + b1 * x1R + b2 * x2R - a1 * y1R - a2 * y2R;
+
+        // 饱和钳制到 16bit
+        int iL = static_cast<int>(yL);
+        int iR = static_cast<int>(yR);
+        if (iL < -32768) iL = -32768; else if (iL > 32767) iL = 32767;
+        if (iR < -32768) iR = -32768; else if (iR > 32767) iR = 32767;
+        samples[i]     = static_cast<INT16>(iL);
+        samples[i + 1] = static_cast<INT16>(iR);
+
+        // 状态推移
+        x2L = x1L; x1L = xL;
+        x2R = x1R; x1R = xR;
+        y2L = y1L; y1L = yL;
+        y2R = y1R; y1R = yR;
+    }
+}
+
+void AudioMixer::BiquadStereo::Reset()
+{
+    x1L = x2L = y1L = y2L = 0;
+    x1R = x2R = y1R = y2R = 0;
+}
+
+// ---- AudioMixer ----
+
+void AudioMixer::SetLowpassCutoff(float fcHz)
+{
+    // 先更新系数和状态，再设标志位——防止采集线程在标志位已更新但系数未更新时进入 Process()
+    m_filter.SetCutoff(fcHz);
+    m_lowpassCutoff = fcHz;
+}
 
 void AudioMixer::PushMicData(const BYTE* data, DWORD size)
 {
@@ -49,6 +132,12 @@ std::vector<BYTE> AudioMixer::MixWithLoopback(std::vector<BYTE>&& loopbackChunk)
         take -= take % 4;  // 对齐到立体声帧边界（2 声道 x 2 字节），防左右声道错位
         std::copy(m_micBuffer.begin(), m_micBuffer.begin() + take, micChunk.begin());
         m_micBuffer.erase(m_micBuffer.begin(), m_micBuffer.begin() + take);
+    }
+
+    // 低通滤波：滤除麦克风高频噪声（电流嘶声）
+    if (m_lowpassCutoff.load() > 0.0f)
+    {
+        m_filter.Process(reinterpret_cast<INT16*>(micChunk.data()), micChunk.size() / sizeof(INT16));
     }
 
     // 逐样本饱和叠加（16bit 有符号；麦克风路先乘增益，钳制防爆音）

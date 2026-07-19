@@ -20,6 +20,7 @@ struct SettingsData
     std::wstring outputFormat = L"m4a";
     float sysGain = 2.0f;
     float micGain = 4.0f;
+    float lowpassCutoff = 10.0f;  // kHz, 0 = 关闭低通滤波
 };
 
 class SettingsDialog

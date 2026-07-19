@@ -289,6 +289,7 @@ void MainWindow::OnStart()
     m_engine.SetMicEnabled(m_micEnabled);
     m_engine.SetMicGain(m_micGain);
     m_engine.SetSystemGain(m_sysGain);
+    m_engine.SetLowpassCutoff(m_lowpassCutoff * 1000.0f);  // kHz → Hz
 
     // Build recordings directory next to exe
     WCHAR exeDir[MAX_PATH];
@@ -343,11 +344,13 @@ void MainWindow::OnSettings()
     cfg.outputFormat = m_outputFormat;
     cfg.sysGain = m_sysGain;
     cfg.micGain = m_micGain;
+    cfg.lowpassCutoff = m_lowpassCutoff;
     if (SettingsDialog::Show(m_hWnd, m_hInst, cfg))
     {
         m_outputFormat = cfg.outputFormat;
         m_sysGain = cfg.sysGain;
         m_micGain = cfg.micGain;
+        m_lowpassCutoff = cfg.lowpassCutoff;
         SaveSettings();
     }
 }
@@ -360,6 +363,7 @@ void MainWindow::LoadSettings()
     m_outputFormat = cfg.outputFormat;
     m_sysGain = cfg.sysGain;
     m_micGain = cfg.micGain;
+    m_lowpassCutoff = cfg.lowpassCutoff;
 }
 
 void MainWindow::SaveSettings()
@@ -369,6 +373,7 @@ void MainWindow::SaveSettings()
     cfg.outputFormat = m_outputFormat;
     cfg.sysGain = m_sysGain;
     cfg.micGain = m_micGain;
+    cfg.lowpassCutoff = m_lowpassCutoff;
     SettingsDialog::SaveToIni(cfg);
 }
 

@@ -2,7 +2,7 @@
 #include <CommCtrl.h>
 
 static SettingsData* g_pData = nullptr;
-static HWND g_hSysEdit, g_hMicEdit;
+static HWND g_hSysEdit, g_hMicEdit, g_hLowpassEdit;
 static bool g_result = false;
 
 void SettingsDialog::LoadFromIni(SettingsData& data)
@@ -20,6 +20,7 @@ void SettingsDialog::LoadFromIni(SettingsData& data)
     data.outputFormat = buf;
     data.sysGain = (float)GetPrivateProfileInt(L"Settings", L"SysGain", 20, iniPath.c_str()) / 10.0f;
     data.micGain = (float)GetPrivateProfileInt(L"Settings", L"MicGain", 40, iniPath.c_str()) / 10.0f;
+    data.lowpassCutoff = (float)GetPrivateProfileInt(L"Settings", L"LowpassCutoff", 100, iniPath.c_str()) / 10.0f;
 }
 
 void SettingsDialog::SaveToIni(const SettingsData& data)
@@ -37,6 +38,20 @@ void SettingsDialog::SaveToIni(const SettingsData& data)
     WritePrivateProfileString(L"Settings", L"SysGain", buf, iniPath.c_str());
     wsprintfW(buf, L"%d", (int)(data.micGain * 10));
     WritePrivateProfileString(L"Settings", L"MicGain", buf, iniPath.c_str());
+    wsprintfW(buf, L"%d", (int)(data.lowpassCutoff * 10));
+    WritePrivateProfileString(L"Settings", L"LowpassCutoff", buf, iniPath.c_str());
+}
+
+static bool ParseLowpass(HWND edit, float& out)
+{
+    WCHAR buf[32];
+    GetWindowText(edit, buf, 32);
+    WCHAR* end = nullptr;
+    double v = wcstod(buf, &end);
+    while (end && (*end == L' ' || *end == L'\t')) end++;  // 跳过尾部空白
+    if (end == buf || *end != L'\0' || v < 0.0 || v > 20.0) return false;
+    out = (float)v;
+    return true;
 }
 
 static bool ParseGain(HWND edit, float& out)
@@ -45,7 +60,8 @@ static bool ParseGain(HWND edit, float& out)
     GetWindowText(edit, buf, 32);
     WCHAR* end = nullptr;
     double v = wcstod(buf, &end);
-    if (end == buf || v < 0.1 || v > 8.0) return false;
+    while (end && (*end == L' ' || *end == L'\t')) end++;  // 跳过尾部空白
+    if (end == buf || *end != L'\0' || v < 0.1 || v > 8.0) return false;
     out = (float)v;
     return true;
 }
@@ -85,6 +101,17 @@ static LRESULT CALLBACK DlgWndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
         CreateWindow(WC_STATIC, L"x（1.0=原音量）", WS_CHILD | WS_VISIBLE | SS_LEFT,
             290, y + 5, 130, 22, hWnd, nullptr, hi, nullptr);
 
+        // 低通滤波截止频率
+        y += 38;
+        CreateWindow(WC_STATIC, L"低通滤波 (kHz), 0=关闭", WS_CHILD | WS_VISIBLE | SS_LEFT,
+            14, y + 5, 200, 22, hWnd, nullptr, hi, nullptr);
+        swprintf_s(buf, L"%.1f", g_pData->lowpassCutoff);
+        g_hLowpassEdit = CreateWindow(WC_EDIT, buf, WS_CHILD | WS_VISIBLE | WS_BORDER,
+            220, y, 60, 26, hWnd, nullptr, hi, nullptr);
+        SendMessage(g_hLowpassEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+        CreateWindow(WC_STATIC, L"kHz（10=默认）", WS_CHILD | WS_VISIBLE | SS_LEFT,
+            290, y + 5, 150, 22, hWnd, nullptr, hi, nullptr);
+
         // 输出格式
         y += 46;
         CreateWindow(WC_STATIC, L"输出格式", WS_CHILD | WS_VISIBLE | SS_LEFT,
@@ -111,6 +138,10 @@ static LRESULT CALLBACK DlgWndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp)
         if (LOWORD(wp) == IDC_SETTINGS_OK) {
             if (!ParseGain(g_hSysEdit, g_pData->sysGain) || !ParseGain(g_hMicEdit, g_pData->micGain)) {
                 MessageBox(hWnd, L"增益值无效，请输入 0.1 至 8.0 之间的数字。", L"输入错误", MB_ICONWARNING);
+                return 0;
+            }
+            if (!ParseLowpass(g_hLowpassEdit, g_pData->lowpassCutoff)) {
+                MessageBox(hWnd, L"低通滤波值无效，请输入 0.0 至 20.0 之间的数字（0=关闭）。", L"输入错误", MB_ICONWARNING);
                 return 0;
             }
             g_pData->outputFormat = (SendDlgItemMessage(hWnd, IDC_FMT_M4A, BM_GETCHECK, 0, 0) == BST_CHECKED) ? L"m4a" : L"wav";
@@ -153,7 +184,7 @@ bool SettingsDialog::Show(HWND parent, HINSTANCE hInst, SettingsData& data)
 
     HWND hWnd = CreateWindowEx(WS_EX_DLGMODALFRAME, L"SettingsDlgWnd", L"设置",
         WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
-        0, 0, 440, 220, parent, nullptr, hInst, nullptr);
+        0, 0, 440, 260, parent, nullptr, hInst, nullptr);
     if (!hWnd) return false;
 
     RECT pr, dr;
