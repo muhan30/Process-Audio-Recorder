@@ -32,11 +32,17 @@ Download the latest version from **[GitHub Releases](https://github.com/muhan30/
 
 ### Settings
 
-- **系统声音增益** (System audio gain): target app audio too quiet? Turn it up (default 2.0×).
-- **麦克风增益** (Mic gain): your voice too quiet? Try 4.0×.
+- **系统声音增益** (System audio gain): target app audio too quiet? Turn it up (default 2.0×, range 0.1–8.0).
+- **麦克风增益** (Mic gain): your voice too quiet? Try 4.0× (range 0.1–8.0).
 - **输出格式** (Output format): M4A compressed (recommended, saves space) / WAV lossless.
+- **低通滤波** (Low-pass filter): removes high-frequency hiss from the microphone (default 10.0 kHz, range 0–20 kHz).
+- **降噪强度** (Noise gate): silences the mic when you're not speaking to eliminate background hum (default 5, range 0–10, 0 = off).
 
 Settings are automatically remembered across restarts.
+
+### File Organization
+
+Recordings are automatically saved into subfolders by app name under `recordings\`, e.g. `recordings\Weixin\2026-07-20 Weixin 14-30-00.m4a`.
 
 ### System Requirements
 
@@ -84,11 +90,17 @@ Full options: `--pid` / `--mode` (0=global, 1=include, 2=exclude) / `--mic on|of
 
 ### 设置
 
-- **系统声音增益**：对方声音太小？把数字调大（默认 2.0 倍）
-- **麦克风增益**：自己声音太小？调到 4.0 倍试试
+- **系统声音增益**：对方声音太小？把数字调大（默认 2.0 倍，范围 0.1–8.0）
+- **麦克风增益**：自己声音太小？调到 4.0 倍试试（范围 0.1–8.0）
 - **输出格式**：M4A 压缩（推荐，省空间）/ WAV 无损
+- **低通滤波**：滤掉麦克风的高频电流嘶声（默认 10.0 kHz，0=关闭，范围 0–20 kHz）
+- **降噪强度**：不说话时自动静音，消除全频段底噪（默认 5，0=关闭，10=最强）
 
 改完自动记住，下次不用再调。
+
+### 文件组织
+
+录音文件自动按软件名分文件夹存放，如 `recordings\微信\2026-07-20 微信 14-30-00.m4a`。
 
 ### 系统要求
 
