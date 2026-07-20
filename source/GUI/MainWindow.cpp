@@ -659,7 +659,7 @@ void MainWindow::CheckAutoRecord()
 {
     if (!m_autoRecord) return;
 
-    // 微信在会话列表中活跃（正在发声）？
+    bool winInCall = IsWeChatInCall();
     bool wechatActive = false;
     for (auto& s : m_sessionList.GetCurrentSessions())
         if ((_wcsicmp(s.processName.c_str(), L"WeChat.exe") == 0 ||
@@ -668,28 +668,27 @@ void MainWindow::CheckAutoRecord()
 
     if (m_autoRecording)
     {
-        // 用户手动停止了 → 不再自动重启
         if (!m_isRecording) { m_autoRecording = false; m_noCallWindowCount = 0; return; }
-        // 自动录音中 → 微信持续不活跃 15 秒才停止（容忍通话间隙）
-        if (!wechatActive)
+        // 停止条件：窗口消失 AND 会话不活跃。两者都满足才开始计时（容忍窗口检测失败或静音）
+        if (!winInCall && !wechatActive)
         {
             m_noCallWindowCount++;
-            if (m_noCallWindowCount >= 15)
+            if (m_noCallWindowCount >= 5)  // 5秒确认
             {
                 OnStop();
                 m_autoRecording = false;
                 m_noCallWindowCount = 0;
             }
         }
-        else
-        {
-            m_noCallWindowCount = 0;
-        }
+        else { m_noCallWindowCount = 0; }
         return;
     }
 
-    // 不在录音 → 微信持续活跃 3 秒才启动（防误触发）
-    if (!wechatActive || m_isRecording) { m_findWechatRetries = 0; return; }
+    if (m_isRecording) { m_findWechatRetries = 0; return; }
+
+    // 启动：窗口检测优先（瞬间响应），会话活跃兜底（需3秒确认）
+    if (winInCall) { m_findWechatRetries = 99; }  // 直接跳过计时
+    if (!winInCall && !wechatActive) { m_findWechatRetries = 0; return; }
     m_findWechatRetries++;
     if (m_findWechatRetries < 3) return;
 
