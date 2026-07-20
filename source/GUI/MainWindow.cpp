@@ -627,24 +627,38 @@ void MainWindow::ScanRecordingHistory()
 
 // ---- 微信自动录音 ----
 
-static BOOL CALLBACK EnumWndProc(HWND hWnd, LPARAM lParam)
+// 递归检查窗口及其子窗口是否匹配微信通话窗口类名
+static bool CheckWindowForWeChatCall(HWND hWnd)
 {
     WCHAR cls[64];
-    if (GetClassNameW(hWnd, cls, 64) == 0) return TRUE;
-    if (_wcsicmp(cls, L"ILinkAudioWnd") == 0 ||
-        _wcsicmp(cls, L"AudioWnd") == 0 ||
-        _wcsicmp(cls, L"ILinkVoipTrayWnd") == 0)
+    if (GetClassNameW(hWnd, cls, 64))
     {
-        *(bool*)lParam = true;
-        return FALSE;
+        if (_wcsicmp(cls, L"ILinkAudioWnd") == 0 ||
+            _wcsicmp(cls, L"AudioWnd") == 0 ||
+            _wcsicmp(cls, L"ILinkVoipTrayWnd") == 0)
+            return true;
     }
-    return TRUE;
+    // 递归检查子窗口
+    HWND child = FindWindowExW(hWnd, nullptr, nullptr, nullptr);
+    while (child)
+    {
+        if (CheckWindowForWeChatCall(child)) return true;
+        child = FindWindowExW(hWnd, child, nullptr, nullptr);
+    }
+    return false;
 }
 
 bool MainWindow::IsWeChatInCall()
 {
+    // 1. 搜 message-only 窗口（WeChat 通话窗口通常是 HWND_MESSAGE 子窗口）
+    for (auto* cls : { L"ILinkAudioWnd", L"AudioWnd", L"ILinkVoipTrayWnd" })
+        if (FindWindowExW(HWND_MESSAGE, nullptr, nullptr, cls)) return true;
+    // 2. 搜普通顶层窗口 + 递归子窗口
     bool found = false;
-    EnumWindows(EnumWndProc, (LPARAM)&found);
+    EnumWindows([](HWND hWnd, LPARAM lp) -> BOOL {
+        if (CheckWindowForWeChatCall(hWnd)) { *(bool*)lp = true; return FALSE; }
+        return TRUE;
+    }, (LPARAM)&found);
     return found;
 }
 
@@ -661,7 +675,16 @@ void MainWindow::CheckAutoRecord()
 {
     if (!m_autoRecord) return;
 
+    // 双重检测：窗口类名 OR 微信在会话列表中活跃发声
     bool inCall = IsWeChatInCall();
+    if (!inCall)
+    {
+        // 窗口检测失败时，检查微信是否在会话列表中活跃
+        for (auto& s : m_sessionList.GetCurrentSessions())
+            if ((_wcsicmp(s.processName.c_str(), L"WeChat.exe") == 0 ||
+                 _wcsicmp(s.processName.c_str(), L"Weixin.exe") == 0) && s.isActive)
+                { inCall = true; break; }
+    }
 
     if (m_autoRecording)
     {
