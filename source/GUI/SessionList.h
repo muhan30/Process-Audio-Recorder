@@ -27,6 +27,7 @@
 #define IDC_HINT_LABEL     1016
 #define IDC_PATH_EDIT2     1017
 #define IDC_PATH_BROWSE2   1018
+#define IDC_HISTORY_LIST   1019
 
 class SessionList
 {
@@ -37,6 +38,7 @@ public:
     std::vector<AudioSessionInfo> GetCurrentSessions() const { return m_sessions; }
     int GetSelectedPid() const;
     void Resize(int w, int h);
+    bool SelectByProcessName(const std::wstring& name);  // 按进程名选中，返回是否找到
 
 private:
     HWND m_hWnd = nullptr;

@@ -57,6 +57,12 @@ private:
     bool m_isRecording = false;
     SYSTEMTIME m_recordingStartST = {};
     std::wstring m_lastRecordingPath;
+    std::wstring m_lastProcess;  // 上次选中的进程名（自动选中用）
+
+    // 录音历史
+    HWND m_hHistoryList = nullptr;
+    std::vector<std::wstring> m_historyPaths;  // item index → full path
+    void ScanRecordingHistory();
 
     // 窗口过程
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp);

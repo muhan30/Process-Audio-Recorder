@@ -71,6 +71,21 @@ int SessionList::GetSelectedPid() const
     return (int)m_sessions[idx].processId;
 }
 
+bool SessionList::SelectByProcessName(const std::wstring& name)
+{
+    if (name.empty()) return false;
+    for (size_t i = 0; i < m_sessions.size(); i++)
+    {
+        if (_wcsicmp(m_sessions[i].processName.c_str(), name.c_str()) == 0)
+        {
+            ListView_SetItemState(m_hWnd, (int)i, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+            ListView_EnsureVisible(m_hWnd, (int)i, FALSE);
+            return true;
+        }
+    }
+    return false;
+}
+
 void SessionList::Resize(int w, int h)
 {
     if (m_hWnd)

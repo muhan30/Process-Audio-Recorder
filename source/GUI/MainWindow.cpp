@@ -3,6 +3,7 @@
 #include "Logger.h"
 #include <CommCtrl.h>
 #include <shellapi.h>
+#include <algorithm>
 #include <sstream>
 #include <iomanip>
 #include <ctime>
@@ -43,7 +44,7 @@ bool MainWindow::CreateMainWindow(int nCmdShow)
 {
     m_hWnd = CreateWindowExW(0, WND_CLASS, L"进程录音机",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-        CW_USEDEFAULT, CW_USEDEFAULT, 500, 440,
+        CW_USEDEFAULT, CW_USEDEFAULT, 500, 580,
         nullptr, nullptr, m_hInst, this);
     if (!m_hWnd) return false;
     ShowWindow(m_hWnd, nCmdShow);
@@ -133,6 +134,22 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 350, 460, 20,
             m_hWnd, nullptr, hi, nullptr);
 
+        // 录音历史列表
+        m_hHistoryList = CreateWindowEx(0, WC_LISTVIEW, L"",
+            WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_SINGLESEL,
+            10, 380, 460, 150, m_hWnd, (HMENU)(UINT_PTR)IDC_HISTORY_LIST, hi, nullptr);
+        ListView_SetExtendedListViewStyle(m_hHistoryList, LVS_EX_FULLROWSELECT);
+        LVCOLUMN hcol = {};
+        hcol.mask = LVCF_TEXT | LVCF_WIDTH;
+        hcol.cx = 180; hcol.pszText = const_cast<LPWSTR>(L"文件名");
+        ListView_InsertColumn(m_hHistoryList, 0, &hcol);
+        hcol.cx = 100; hcol.pszText = const_cast<LPWSTR>(L"软件");
+        ListView_InsertColumn(m_hHistoryList, 1, &hcol);
+        hcol.cx = 110; hcol.pszText = const_cast<LPWSTR>(L"日期");
+        ListView_InsertColumn(m_hHistoryList, 2, &hcol);
+        hcol.cx = 60; hcol.pszText = const_cast<LPWSTR>(L"大小");
+        ListView_InsertColumn(m_hHistoryList, 3, &hcol);
+
         // 字体
         for (HWND c : { m_hRefreshBtn, m_hHintLabel, m_hMicCheck, m_hSettingsBtn,
                         m_hTimerLabel, m_hSysLevel, m_hMicLevel, m_hSizeLabel, m_hSaveLink })
@@ -142,13 +159,47 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         AddTrayIcon();
         ShowIdleState();
         OnRefresh();
+        ScanRecordingHistory();
         SetTimer(m_hWnd, 2, 1000, nullptr);
         return 0;
     }
 
     case WM_SIZE:
-        m_sessionList.Resize(LOWORD(lp) - 20, 150);
+        {
+            int w = LOWORD(lp), h = HIWORD(lp);
+            m_sessionList.Resize(w - 20, 150);
+            if (m_hHistoryList)
+                SetWindowPos(m_hHistoryList, nullptr, 10, 380, w - 20,
+                    (std::max)(0, h - 400), SWP_NOZORDER);
+        }
         return 0;
+
+    case WM_NOTIFY:
+    {
+        auto* nmh = reinterpret_cast<LPNMHDR>(lp);
+        if (nmh->idFrom == IDC_SESSION_LIST && nmh->code == LVN_ITEMCHANGED)
+        {
+            auto* nmlv = reinterpret_cast<LPNMLISTVIEW>(lp);
+            if ((nmlv->uNewState & LVIS_SELECTED) && !m_isRecording)
+            {
+                int idx = nmlv->iItem;
+                const auto& sessions = m_sessionList.GetCurrentSessions();
+                if (idx >= 0 && idx < (int)sessions.size())
+                {
+                    m_lastProcess = sessions[idx].processName;
+                    SaveSettings();
+                }
+            }
+        }
+        if (nmh->idFrom == IDC_HISTORY_LIST && nmh->code == NM_DBLCLK)
+        {
+            auto* nmlv = reinterpret_cast<LPNMLISTVIEW>(lp);
+            if (nmlv->iItem >= 0 && nmlv->iItem < (int)m_historyPaths.size())
+                ShellExecute(nullptr, L"open", m_historyPaths[nmlv->iItem].c_str(),
+                    nullptr, nullptr, SW_SHOWNORMAL);
+        }
+        return 0;
+    }
 
     case WM_COMMAND:
     {
@@ -223,6 +274,7 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             }
         }
         ShowIdleState();
+        ScanRecordingHistory();
         return 0;
     }
 
@@ -277,7 +329,12 @@ void MainWindow::ShowRecordingState()
 }
 
 // ---- 操作 ----
-void MainWindow::OnRefresh() { m_sessionList.Refresh(); }
+void MainWindow::OnRefresh()
+{
+    m_sessionList.Refresh();
+    if (!m_lastProcess.empty())
+        m_sessionList.SelectByProcessName(m_lastProcess);
+}
 
 void MainWindow::OnStart()
 {
@@ -378,6 +435,15 @@ void MainWindow::LoadSettings()
     m_micGain = cfg.micGain;
     m_lowpassCutoff = cfg.lowpassCutoff;
     m_noiseGateStrength = cfg.noiseGateStrength;
+    // LastProcess
+    WCHAR iniPath[MAX_PATH];
+    GetModuleFileName(nullptr, iniPath, MAX_PATH);
+    WCHAR* last = wcsrchr(iniPath, L'\\');
+    if (last) *(last + 1) = L'\0';
+    std::wstring ini = std::wstring(iniPath) + L"ProcessAudioRecorder.ini";
+    WCHAR buf[MAX_PATH];
+    GetPrivateProfileString(L"Settings", L"LastProcess", L"", buf, MAX_PATH, ini.c_str());
+    m_lastProcess = buf;
 }
 
 void MainWindow::SaveSettings()
@@ -390,6 +456,13 @@ void MainWindow::SaveSettings()
     cfg.lowpassCutoff = m_lowpassCutoff;
     cfg.noiseGateStrength = m_noiseGateStrength;
     SettingsDialog::SaveToIni(cfg);
+    // LastProcess
+    WCHAR iniPath[MAX_PATH];
+    GetModuleFileName(nullptr, iniPath, MAX_PATH);
+    WCHAR* last = wcsrchr(iniPath, L'\\');
+    if (last) *(last + 1) = L'\0';
+    std::wstring ini = std::wstring(iniPath) + L"ProcessAudioRecorder.ini";
+    WritePrivateProfileString(L"Settings", L"LastProcess", m_lastProcess.c_str(), ini.c_str());
 }
 
 // ---- 电平 ----
@@ -418,6 +491,100 @@ void MainWindow::UpdateStatus(const CaptureStatus& st)
     if (bytes < 1024 * 1024) wsprintfW(buf, L"文件大小: %u KB", (UINT)(bytes / 1024));
     else swprintf_s(buf, L"文件大小: %.1f MB", bytes / (1024.0 * 1024.0));
     SetWindowText(m_hSizeLabel, buf);
+}
+
+// ---- 录音历史 ----
+void MainWindow::ScanRecordingHistory()
+{
+    ListView_DeleteAllItems(m_hHistoryList);
+    m_historyPaths.clear();
+
+    WCHAR exeDir[MAX_PATH];
+    GetModuleFileName(nullptr, exeDir, MAX_PATH);
+    WCHAR* lastSlash = wcsrchr(exeDir, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    std::wstring recDir = std::wstring(exeDir) + L"\\recordings";
+
+    // 收集所有录音文件
+    struct FileEntry {
+        std::wstring path, name, folder, dateStr;
+        ULONGLONG size;
+        FILETIME ft;
+    };
+    std::vector<FileEntry> files;
+
+    // 遍历 recordings/ 下所有子文件夹
+    std::wstring sdSearch = recDir + L"\\*";
+    WIN32_FIND_DATAW sdFd;
+    HANDLE hSd = FindFirstFileW(sdSearch.c_str(), &sdFd);
+    if (hSd != INVALID_HANDLE_VALUE)
+    {
+        do {
+            if (!(sdFd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+            if (wcscmp(sdFd.cFileName, L".") == 0 || wcscmp(sdFd.cFileName, L"..") == 0) continue;
+
+            std::wstring subDir = recDir + L"\\" + sdFd.cFileName;
+
+            // 同时搜 .m4a 和 .wav
+            for (auto* ext : { L"*.m4a", L"*.wav" })
+            {
+                WIN32_FIND_DATAW fFd;
+                HANDLE hF = FindFirstFileW((subDir + L"\\" + ext).c_str(), &fFd);
+                if (hF == INVALID_HANDLE_VALUE) continue;
+                do {
+                    if (fFd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                    FileEntry fe;
+                    fe.path = subDir + L"\\" + fFd.cFileName;
+                    fe.name = fFd.cFileName;
+                    fe.folder = sdFd.cFileName;
+                    fe.size = ((ULONGLONG)fFd.nFileSizeHigh << 32) | fFd.nFileSizeLow;
+                    fe.ft = fFd.ftCreationTime;
+
+                    FILETIME localFt;
+                    FileTimeToLocalFileTime(&fFd.ftCreationTime, &localFt);
+                    SYSTEMTIME st;
+                    FileTimeToSystemTime(&localFt, &st);
+                    WCHAR dateBuf[64];
+                    wsprintfW(dateBuf, L"%04d-%02d-%02d %02d:%02d",
+                        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+                    fe.dateStr = dateBuf;
+                    files.push_back(fe);
+                } while (FindNextFileW(hF, &fFd));
+                FindClose(hF);
+            }
+        } while (FindNextFileW(hSd, &sdFd));
+        FindClose(hSd);
+    }
+
+    // 按时间倒序
+    std::sort(files.begin(), files.end(),
+        [](const FileEntry& a, const FileEntry& b) {
+            return CompareFileTime(&a.ft, &b.ft) > 0;
+        });
+
+    // 最多 50 条
+    size_t maxItems = (std::min)(files.size(), (size_t)50);
+    for (size_t i = 0; i < maxItems; i++)
+    {
+        auto& fe = files[i];
+        m_historyPaths.push_back(fe.path);
+
+        LVITEM item = {};
+        item.mask = LVIF_TEXT;
+        item.iItem = (int)i;
+        item.pszText = const_cast<LPWSTR>(fe.name.c_str());
+        ListView_InsertItem(m_hHistoryList, &item);
+
+        ListView_SetItemText(m_hHistoryList, (int)i, 1, const_cast<LPWSTR>(fe.folder.c_str()));
+        ListView_SetItemText(m_hHistoryList, (int)i, 2, const_cast<LPWSTR>(fe.dateStr.c_str()));
+
+        WCHAR sizeBuf[32];
+        if (fe.size < 1024 * 1024)
+            wsprintfW(sizeBuf, L"%u KB", (UINT)(fe.size / 1024));
+        else
+            swprintf_s(sizeBuf, L"%.1f MB", fe.size / (1024.0 * 1024.0));
+        ListView_SetItemText(m_hHistoryList, (int)i, 3, sizeBuf);
+    }
 }
 
 // ---- 托盘 ----
