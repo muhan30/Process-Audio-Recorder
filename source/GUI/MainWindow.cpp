@@ -632,15 +632,20 @@ bool MainWindow::IsWeChatInCall()
 {
     bool found = false;
     EnumWindows([](HWND hWnd, LPARAM lp) -> BOOL {
-        WCHAR cls[64] = {};
+        WCHAR cls[64] = {}, title[128] = {};
         GetClassNameW(hWnd, cls, 64);
-        if (_wcsicmp(cls, L"ILinkAudioWnd") == 0 ||
-            _wcsicmp(cls, L"AudioWnd") == 0 ||
-            _wcsicmp(cls, L"ILinkVoipTrayWnd") == 0)
-        {
-            *(bool*)lp = true;
-            return FALSE;
-        }
+        GetWindowTextW(hWnd, title, 128);
+
+        // 方法1: Qt5 通话窗口 "Weixin Voice & Video Calls"
+        if (wcsstr(cls, L"QWindowIcon") &&
+            (wcsstr(title, L"Voice") || wcsstr(title, L"Call") ||
+             wcsstr(title, L"语音") || wcsstr(title, L"通话") || wcsstr(title, L"视频")))
+            { *(bool*)lp = true; return FALSE; }
+
+        // 方法2: 通话视频渲染子窗口
+        if (_wcsicmp(cls, L"MMUIRenderSubWindowHW") == 0)
+            { *(bool*)lp = true; return FALSE; }
+
         return TRUE;
     }, (LPARAM)&found);
     return found;
@@ -659,21 +664,16 @@ void MainWindow::CheckAutoRecord()
 {
     if (!m_autoRecord) return;
 
-    bool winInCall = IsWeChatInCall();
-    bool wechatActive = false;
-    for (auto& s : m_sessionList.GetCurrentSessions())
-        if ((_wcsicmp(s.processName.c_str(), L"WeChat.exe") == 0 ||
-             _wcsicmp(s.processName.c_str(), L"Weixin.exe") == 0) && s.isActive)
-            { wechatActive = true; break; }
+    bool inCall = IsWeChatInCall();
 
     if (m_autoRecording)
     {
         if (!m_isRecording) { m_autoRecording = false; m_noCallWindowCount = 0; return; }
-        // 停止条件：窗口消失 AND 会话不活跃。两者都满足才开始计时（容忍窗口检测失败或静音）
-        if (!winInCall && !wechatActive)
+        // 停止：通话窗口消失 → 3秒确认 → 停止
+        if (!inCall)
         {
             m_noCallWindowCount++;
-            if (m_noCallWindowCount >= 5)  // 5秒确认
+            if (m_noCallWindowCount >= 3)
             {
                 OnStop();
                 m_autoRecording = false;
@@ -686,11 +686,10 @@ void MainWindow::CheckAutoRecord()
 
     if (m_isRecording) { m_findWechatRetries = 0; return; }
 
-    // 启动：窗口检测优先（瞬间响应），会话活跃兜底（需3秒确认）
-    if (winInCall) { m_findWechatRetries = 99; }  // 直接跳过计时
-    if (!winInCall && !wechatActive) { m_findWechatRetries = 0; return; }
+    // 启动：通话窗口出现 → 找微信 PID → 开始录音
+    if (!inCall) { m_findWechatRetries = 0; return; }
     m_findWechatRetries++;
-    if (m_findWechatRetries < 3) return;
+    if (m_findWechatRetries < 2) return;  // 1秒确认
 
     int pid = FindWeChatPid();
     if (pid == 0) { m_findWechatRetries = 0; return; }
