@@ -23,12 +23,12 @@ Download the latest version from **[GitHub Releases](https://github.com/muhan30/
 ### Quick Start
 
 1. Double-click `ProcessAudioRecorderGUI.exe`.
-2. Start playing audio in your target app (e.g., connect a WeChat call), then click **刷新** (Refresh).
-3. Select the app from the list. Check "同时录我的麦克风" (Record my microphone).
-4. Click **开始录音** (Start Recording). You should see the level meters bouncing.
-5. Click **停止并保存** (Stop & Save). The file is saved in the `recordings\` folder next to the exe.
+2. **WeChat auto-record**: Check "微信通话自动录音" and make/receive a call — recording starts and stops automatically.
+3. **Manual mode**: Start audio in your target app, click **刷新** (Refresh), select the app, and click **开始录音** (Start Recording).
+4. Click **停止并保存** (Stop & Save) or hang up the call. Files are saved in `recordings\<app name>\`.
 
 > Pressing ✕ minimizes to the system tray — recording continues uninterrupted.
+> The recording history list at the bottom shows all past recordings — double-click to play.
 
 ### Settings
 
@@ -81,12 +81,12 @@ Full options: `--pid` / `--mode` (0=global, 1=include, 2=exclude) / `--mic on|of
 ### 怎么用
 
 1. 双击 `ProcessAudioRecorderGUI.exe`
-2. 让目标软件出个声（比如接通微信电话），点 **刷新**
-3. 在列表中选中要录的软件，勾选"同时录我的麦克风"
-4. 点 **开始录音**，说话——看到电平条在跳就对了
-5. 通完话点 **停止并保存**，文件保存在 `recordings\` 文件夹
+2. **微信自动录音**：勾上"微信通话自动录音"，接/打电话即自动开始，挂断自动停止
+3. **手动模式**：让目标软件出个声，点 **刷新**，选中软件，点 **开始录音**
+4. 通完话点 **停止并保存**，文件保存在 `recordings\软件名\`
 
 > 点窗口 ✕ 会缩到右下角托盘继续录音，不中断。
+> 底部录音历史列表显示所有历史录音，双击即可播放。
 
 ### 设置
 
