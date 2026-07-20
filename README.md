@@ -6,7 +6,7 @@
 
 ## English
 
-A Windows desktop recording tool based on [CingZeoi/AudioLoopbackRecorder](https://github.com/CingZeoi/AudioLoopbackRecorder) (original author: 张赐荣/Cirong Zhang, MIT License, original README: [README_ORIGINAL.md](README_ORIGINAL.md)).
+A Windows desktop recording tool based on [CingZeoi/AudioLoopbackRecorder](https://github.com/CingZeoi/AudioLoopbackRecorder) (original author: 张赐荣/Cirong Zhang, MIT License).
 
 **Core capability**: record audio from a specific application (e.g., a WeChat call), while completely excluding sounds from all other apps. No virtual audio cable needed — built entirely on native Windows APIs.
 
@@ -18,7 +18,7 @@ A Windows desktop recording tool based on [CingZeoi/AudioLoopbackRecorder](https
 
 ### Download
 
-Download the latest version from **[GitHub Releases](https://github.com/muhan30/Process-Audio-Recorder/releases)** (685 KB, single file, no installation required).
+Download the latest version from **[GitHub Releases](https://github.com/muhan30/Process-Audio-Recorder/releases)** (732 KB, single file, no installation required).
 
 ### Quick Start
 
@@ -42,7 +42,7 @@ Settings are automatically remembered across restarts.
 
 ### File Organization
 
-Recordings are automatically saved into subfolders by app name under `recordings\`, e.g. `recordings\Weixin\2026-07-20 Weixin 14-30-00.m4a`.
+Recordings are automatically saved into subfolders by app name under `recordings\`, e.g. `recordings\Weixin\2026-07-20 Weixin.exe 14-30-00.m4a`.
 
 ### System Requirements
 
@@ -64,7 +64,7 @@ Full options: `--pid` / `--mode` (0=global, 1=include, 2=exclude) / `--mic on|of
 
 ## 中文
 
-基于 [CingZeoi/AudioLoopbackRecorder](https://github.com/CingZeoi/AudioLoopbackRecorder)（原作者张赐荣，MIT 协议，原文见 [README_ORIGINAL.md](README_ORIGINAL.md)）开发的 Windows 桌面录音工具。
+基于 [CingZeoi/AudioLoopbackRecorder](https://github.com/CingZeoi/AudioLoopbackRecorder)（原作者张赐荣，MIT 协议）开发的 Windows 桌面录音工具。
 
 **核心能力**：只录你指定的软件（比如微信通话）的声音，其他软件一概不进。无需虚拟声卡，完全依靠 Windows 原生接口。
 
@@ -76,7 +76,7 @@ Full options: `--pid` / `--mode` (0=global, 1=include, 2=exclude) / `--mic on|of
 
 ### 下载
 
-从 **[GitHub Releases](https://github.com/muhan30/Process-Audio-Recorder/releases)** 下载最新版本（685 KB，单文件，无需安装）。
+从 **[GitHub Releases](https://github.com/muhan30/Process-Audio-Recorder/releases)** 下载最新版本（732 KB，单文件，无需安装）。
 
 ### 怎么用
 
@@ -100,7 +100,7 @@ Full options: `--pid` / `--mode` (0=global, 1=include, 2=exclude) / `--mic on|of
 
 ### 文件组织
 
-录音文件自动按软件名分文件夹存放，如 `recordings\微信\2026-07-20 微信 14-30-00.m4a`。
+录音文件自动按软件名分文件夹存放，如 `recordings\Weixin\2026-07-20 Weixin.exe 14-30-00.m4a`。
 
 ### 系统要求
 
