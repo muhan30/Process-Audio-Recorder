@@ -44,6 +44,7 @@ private:
     HWND m_hSysLevel = nullptr;
     HWND m_hMicLevel = nullptr;
     HWND m_hSaveLink = nullptr;
+    HWND m_hAutoCheck = nullptr;  // 微信自动录音复选框
 
     // 引擎
     CaptureEngine m_engine;
@@ -63,6 +64,15 @@ private:
     HWND m_hHistoryList = nullptr;
     std::vector<std::wstring> m_historyPaths;  // item index → full path
     void ScanRecordingHistory();
+
+    // 微信自动录音
+    bool m_autoRecord = true;         // 复选框状态 / INI: AutoRecord
+    bool m_autoRecording = false;     // 当前录音是否由自动触发
+    int m_noCallWindowCount = 0;      // 连续无通话窗口秒数（3秒冷却）
+    int m_findWechatRetries = 0;      // 找微信 PID 重试次数
+    bool IsWeChatInCall();            // EnumWindows 检测通话窗口
+    int FindWeChatPid();              // 从会话列表找微信 PID
+    void CheckAutoRecord();           // 定时器回调：自动启停主逻辑
 
     // 窗口过程
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp);

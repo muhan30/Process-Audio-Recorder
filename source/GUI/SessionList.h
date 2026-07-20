@@ -28,6 +28,7 @@
 #define IDC_PATH_EDIT2     1017
 #define IDC_PATH_BROWSE2   1018
 #define IDC_HISTORY_LIST   1019
+#define IDC_AUTO_RECORD    1020
 
 class SessionList
 {

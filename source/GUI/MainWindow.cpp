@@ -109,6 +109,12 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 390, y, 80, 24,
             m_hWnd, (HMENU)(UINT_PTR)IDC_SETTINGS_BTN, hi, nullptr);
 
+        y = 237;
+        m_hAutoCheck = CreateWindowEx(0, WC_BUTTON, L"微信通话自动录音",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 10, y, 220, 22,
+            m_hWnd, (HMENU)(UINT_PTR)IDC_AUTO_RECORD, hi, nullptr);
+        SendMessage(m_hAutoCheck, WM_SETFONT, (WPARAM)hFont, TRUE);
+
         y = 255;
         m_hStartBtn = CreateWindowEx(0, WC_BUTTON, L"开始录音",
             WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | BS_VCENTER | BS_OWNERDRAW,
@@ -152,10 +158,11 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
 
         // 字体
         for (HWND c : { m_hRefreshBtn, m_hHintLabel, m_hMicCheck, m_hSettingsBtn,
-                        m_hTimerLabel, m_hSysLevel, m_hMicLevel, m_hSizeLabel, m_hSaveLink })
+                        m_hTimerLabel, m_hSysLevel, m_hMicLevel, m_hSizeLabel, m_hSaveLink, m_hAutoCheck })
             if (c) SendMessage(c, WM_SETFONT, (WPARAM)hFont, TRUE);
 
         LoadSettings();
+        SendMessage(m_hAutoCheck, BM_SETCHECK, m_autoRecord ? BST_CHECKED : BST_UNCHECKED, 0);
         AddTrayIcon();
         ShowIdleState();
         OnRefresh();
@@ -226,6 +233,11 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         case IDC_MIC_CHECK:
             m_micEnabled = (SendMessage(m_hMicCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
             break;
+        case IDC_AUTO_RECORD:
+            m_autoRecord = (SendMessage(m_hAutoCheck, BM_GETCHECK, 0, 0) == BST_CHECKED);
+            if (!m_autoRecord) { m_autoRecording = false; m_noCallWindowCount = 0; m_findWechatRetries = 0; }
+            SaveSettings();
+            break;
         case IDM_TRAY_SHOW:
             ShowWindow(m_hWnd, SW_SHOW); break;
         case IDM_TRAY_STOP:
@@ -294,8 +306,10 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
     case WM_TIMER:
         if (wp == 1)
             UpdateStatus(m_engine.GetStatus());  // GUI 线程主动拉状态，线程安全
-        else if (wp == 2)
+        else if (wp == 2) {
             OnRefresh();
+            CheckAutoRecord();
+        }
         return 0;
 
     case WM_DESTROY:
@@ -315,6 +329,7 @@ void MainWindow::ShowIdleState()
     ShowWindow(m_hHintLabel, SW_SHOW);
     ShowWindow(m_hMicCheck, SW_SHOW);
     ShowWindow(m_hSettingsBtn, SW_SHOW);
+    ShowWindow(m_hAutoCheck, SW_SHOW);
     ShowWindow(m_hStopBtn, SW_HIDE);
     ShowWindow(m_hTimerLabel, SW_HIDE);
     ShowWindow(m_hSysLevel, SW_HIDE);
@@ -332,6 +347,7 @@ void MainWindow::ShowRecordingState()
     ShowWindow(m_hHintLabel, SW_HIDE);
     ShowWindow(m_hMicCheck, SW_HIDE);
     ShowWindow(m_hSettingsBtn, SW_HIDE);
+    ShowWindow(m_hAutoCheck, SW_HIDE);
     ShowWindow(m_hStopBtn, SW_SHOW);
     ShowWindow(m_hTimerLabel, SW_SHOW);
     ShowWindow(m_hSysLevel, SW_SHOW);
@@ -457,6 +473,7 @@ void MainWindow::LoadSettings()
     WCHAR buf[MAX_PATH];
     GetPrivateProfileString(L"Settings", L"LastProcess", L"", buf, MAX_PATH, ini.c_str());
     m_lastProcess = buf;
+    m_autoRecord = GetPrivateProfileInt(L"Settings", L"AutoRecord", 1, ini.c_str()) != 0;
 }
 
 void MainWindow::SaveSettings()
@@ -476,6 +493,9 @@ void MainWindow::SaveSettings()
     if (last) *(last + 1) = L'\0';
     std::wstring ini = std::wstring(iniPath) + L"ProcessAudioRecorder.ini";
     WritePrivateProfileString(L"Settings", L"LastProcess", m_lastProcess.c_str(), ini.c_str());
+    WCHAR abuf[8];
+    wsprintfW(abuf, L"%d", m_autoRecord ? 1 : 0);
+    WritePrivateProfileString(L"Settings", L"AutoRecord", abuf, ini.c_str());
 }
 
 // ---- 电平 ----
@@ -603,6 +623,91 @@ void MainWindow::ScanRecordingHistory()
             swprintf_s(sizeBuf, L"%.1f MB", fe.size / (1024.0 * 1024.0));
         ListView_SetItemText(m_hHistoryList, (int)i, 3, sizeBuf);
     }
+}
+
+// ---- 微信自动录音 ----
+
+static BOOL CALLBACK EnumWndProc(HWND hWnd, LPARAM lParam)
+{
+    WCHAR cls[64];
+    if (GetClassNameW(hWnd, cls, 64) == 0) return TRUE;
+    if (_wcsicmp(cls, L"ILinkAudioWnd") == 0 ||
+        _wcsicmp(cls, L"AudioWnd") == 0 ||
+        _wcsicmp(cls, L"ILinkVoipTrayWnd") == 0)
+    {
+        *(bool*)lParam = true;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+bool MainWindow::IsWeChatInCall()
+{
+    bool found = false;
+    EnumWindows(EnumWndProc, (LPARAM)&found);
+    return found;
+}
+
+int MainWindow::FindWeChatPid()
+{
+    for (auto& s : m_sessionList.GetCurrentSessions())
+        if (_wcsicmp(s.processName.c_str(), L"WeChat.exe") == 0 ||
+            _wcsicmp(s.processName.c_str(), L"Weixin.exe") == 0)
+            return (int)s.processId;
+    return 0;
+}
+
+void MainWindow::CheckAutoRecord()
+{
+    if (!m_autoRecord) return;
+
+    bool inCall = IsWeChatInCall();
+
+    if (m_autoRecording)
+    {
+        // 用户手动停止了 → 不再自动重启
+        if (!m_isRecording) { m_autoRecording = false; return; }
+        // 自动录音中 → 监听通话是否结束
+        if (!inCall)
+        {
+            m_noCallWindowCount++;
+            if (m_noCallWindowCount >= 3) // 持续3秒无通话窗口 → 停止
+            {
+                OnStop();
+                m_autoRecording = false;
+                m_noCallWindowCount = 0;
+            }
+        }
+        else
+        {
+            m_noCallWindowCount = 0; // 窗口又出现了，重置冷却
+        }
+        return;
+    }
+
+    // 不在自动录音 → 检测通话是否开始
+    if (!inCall || m_isRecording)
+    {
+        m_findWechatRetries = 0;  // 无通话或已在手动录音 → 重置
+        return;
+    }
+
+    // 通话窗口出现，且不在录音
+    m_findWechatRetries++;
+    if (m_findWechatRetries > 10) return;  // 10秒未找到 → 放弃
+
+    int pid = FindWeChatPid();
+    if (pid == 0) return;  // 会话列表还没刷新出微信 → 下次重试
+
+    // 找到微信 PID → 自动开始
+    m_autoRecording = true;
+    m_findWechatRetries = 0;
+
+    // 先将选中设为微信
+    m_sessionList.SelectByProcessName(L"WeChat.exe");
+    m_sessionList.SelectByProcessName(L"Weixin.exe");
+
+    OnStart();
 }
 
 // ---- 托盘 ----
