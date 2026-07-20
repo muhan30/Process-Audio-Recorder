@@ -693,21 +693,6 @@ void MainWindow::CheckAutoRecord()
             }
         }
         else { m_noCallWindowCount = 0; }
-
-        // 静音检测：双方持续无声 > 60秒 → 自动停止（仅自动录音）
-        CaptureStatus st = m_engine.GetStatus();
-        if (st.systemLevel == 0 && st.micLevel == 0)
-        {
-            m_silenceSeconds++;
-            if (m_silenceSeconds >= 60)
-            {
-                Logger::Log(L"微信自动录音: 双方持续静音60秒，自动停止");
-                OnStop();
-                m_autoRecording = false;
-                m_silenceSeconds = 0;
-            }
-        }
-        else { m_silenceSeconds = 0; }
         return;
     }
 

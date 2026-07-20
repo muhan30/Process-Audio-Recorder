@@ -74,7 +74,6 @@ private:
     bool IsWeChatInCall();            // EnumWindows 检测通话窗口
     int FindWeChatPid();              // 从会话列表找微信 PID
     void CheckAutoRecord();           // 定时器回调：自动启停主逻辑
-    int m_silenceSeconds = 0;         // 连续静音秒数（双方无声）
 
     // 窗口过程
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp);
