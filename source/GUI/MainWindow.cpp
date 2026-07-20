@@ -675,16 +675,9 @@ void MainWindow::CheckAutoRecord()
 {
     if (!m_autoRecord) return;
 
-    // 双重检测：窗口类名 OR 微信在会话列表中活跃发声
+    // 仅靠窗口类名判断通话状态（参考 WeChatRecorder.py）
+    // 窗口存在 = 通话中（无论当前是否有声音），窗口消失 = 挂断
     bool inCall = IsWeChatInCall();
-    if (!inCall)
-    {
-        // 窗口检测失败时，检查微信是否在会话列表中活跃
-        for (auto& s : m_sessionList.GetCurrentSessions())
-            if ((_wcsicmp(s.processName.c_str(), L"WeChat.exe") == 0 ||
-                 _wcsicmp(s.processName.c_str(), L"Weixin.exe") == 0) && s.isActive)
-                { inCall = true; break; }
-    }
 
     if (m_autoRecording)
     {
