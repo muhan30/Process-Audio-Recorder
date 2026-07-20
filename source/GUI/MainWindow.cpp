@@ -195,8 +195,21 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         {
             auto* nmlv = reinterpret_cast<LPNMLISTVIEW>(lp);
             if (nmlv->iItem >= 0 && nmlv->iItem < (int)m_historyPaths.size())
-                ShellExecute(nullptr, L"open", m_historyPaths[nmlv->iItem].c_str(),
-                    nullptr, nullptr, SW_SHOWNORMAL);
+            {
+                std::wstring path = m_historyPaths[nmlv->iItem];
+                // 文件存在检查 + 用 ShellExecuteEx 打开（关联默认播放器）
+                if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES)
+                {
+                    SHELLEXECUTEINFOW sei = {};
+                    sei.cbSize = sizeof(sei);
+                    sei.fMask = 0;
+                    sei.hwnd = m_hWnd;
+                    sei.lpVerb = L"open";
+                    sei.lpFile = path.c_str();
+                    sei.nShow = SW_SHOWNORMAL;
+                    ShellExecuteExW(&sei);
+                }
+            }
         }
         return 0;
     }
@@ -513,6 +526,38 @@ void MainWindow::ScanRecordingHistory()
     };
     std::vector<FileEntry> files;
 
+    // 辅助：收集某目录下的录音文件
+    auto collectDir = [&](const std::wstring& dir, const std::wstring& folderLabel) {
+        for (auto* ext : { L"*.m4a", L"*.wav" })
+        {
+            WIN32_FIND_DATAW fFd;
+            HANDLE hF = FindFirstFileW((dir + L"\\" + ext).c_str(), &fFd);
+            if (hF == INVALID_HANDLE_VALUE) continue;
+            do {
+                if (fFd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                FileEntry fe;
+                fe.path = dir + L"\\" + fFd.cFileName;
+                fe.name = fFd.cFileName;
+                fe.folder = folderLabel;
+                fe.size = ((ULONGLONG)fFd.nFileSizeHigh << 32) | fFd.nFileSizeLow;
+                fe.ft = fFd.ftCreationTime;
+                FILETIME localFt;
+                FileTimeToLocalFileTime(&fFd.ftCreationTime, &localFt);
+                SYSTEMTIME st;
+                FileTimeToSystemTime(&localFt, &st);
+                WCHAR dateBuf[64];
+                wsprintfW(dateBuf, L"%04d-%02d-%02d %02d:%02d",
+                    st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+                fe.dateStr = dateBuf;
+                files.push_back(fe);
+            } while (FindNextFileW(hF, &fFd));
+            FindClose(hF);
+        }
+    };
+
+    // 扫描 recordings/ 根目录（旧录音，分文件夹功能之前）
+    collectDir(recDir, L"(根目录)");
+
     // 遍历 recordings/ 下所有子文件夹
     std::wstring sdSearch = recDir + L"\\*";
     WIN32_FIND_DATAW sdFd;
@@ -524,34 +569,7 @@ void MainWindow::ScanRecordingHistory()
             if (wcscmp(sdFd.cFileName, L".") == 0 || wcscmp(sdFd.cFileName, L"..") == 0) continue;
 
             std::wstring subDir = recDir + L"\\" + sdFd.cFileName;
-
-            // 同时搜 .m4a 和 .wav
-            for (auto* ext : { L"*.m4a", L"*.wav" })
-            {
-                WIN32_FIND_DATAW fFd;
-                HANDLE hF = FindFirstFileW((subDir + L"\\" + ext).c_str(), &fFd);
-                if (hF == INVALID_HANDLE_VALUE) continue;
-                do {
-                    if (fFd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                    FileEntry fe;
-                    fe.path = subDir + L"\\" + fFd.cFileName;
-                    fe.name = fFd.cFileName;
-                    fe.folder = sdFd.cFileName;
-                    fe.size = ((ULONGLONG)fFd.nFileSizeHigh << 32) | fFd.nFileSizeLow;
-                    fe.ft = fFd.ftCreationTime;
-
-                    FILETIME localFt;
-                    FileTimeToLocalFileTime(&fFd.ftCreationTime, &localFt);
-                    SYSTEMTIME st;
-                    FileTimeToSystemTime(&localFt, &st);
-                    WCHAR dateBuf[64];
-                    wsprintfW(dateBuf, L"%04d-%02d-%02d %02d:%02d",
-                        st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
-                    fe.dateStr = dateBuf;
-                    files.push_back(fe);
-                } while (FindNextFileW(hF, &fFd));
-                FindClose(hF);
-            }
+            collectDir(subDir, sdFd.cFileName);
         } while (FindNextFileW(hSd, &sdFd));
         FindClose(hSd);
     }
