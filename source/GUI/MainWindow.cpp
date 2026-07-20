@@ -659,19 +659,22 @@ void MainWindow::CheckAutoRecord()
 {
     if (!m_autoRecord) return;
 
-    // 仅靠窗口类名判断通话状态（参考 WeChatRecorder.py）
-    // 窗口存在 = 通话中（无论当前是否有声音），窗口消失 = 挂断
-    bool inCall = IsWeChatInCall();
+    // 微信在会话列表中活跃（正在发声）？
+    bool wechatActive = false;
+    for (auto& s : m_sessionList.GetCurrentSessions())
+        if ((_wcsicmp(s.processName.c_str(), L"WeChat.exe") == 0 ||
+             _wcsicmp(s.processName.c_str(), L"Weixin.exe") == 0) && s.isActive)
+            { wechatActive = true; break; }
 
     if (m_autoRecording)
     {
         // 用户手动停止了 → 不再自动重启
-        if (!m_isRecording) { m_autoRecording = false; return; }
-        // 自动录音中 → 监听通话是否结束
-        if (!inCall)
+        if (!m_isRecording) { m_autoRecording = false; m_noCallWindowCount = 0; return; }
+        // 自动录音中 → 微信持续不活跃 15 秒才停止（容忍通话间隙）
+        if (!wechatActive)
         {
             m_noCallWindowCount++;
-            if (m_noCallWindowCount >= 3) // 持续3秒无通话窗口 → 停止
+            if (m_noCallWindowCount >= 15)
             {
                 OnStop();
                 m_autoRecording = false;
@@ -680,33 +683,23 @@ void MainWindow::CheckAutoRecord()
         }
         else
         {
-            m_noCallWindowCount = 0; // 窗口又出现了，重置冷却
+            m_noCallWindowCount = 0;
         }
         return;
     }
 
-    // 不在自动录音 → 检测通话是否开始
-    if (!inCall || m_isRecording)
-    {
-        m_findWechatRetries = 0;  // 无通话或已在手动录音 → 重置
-        return;
-    }
-
-    // 通话窗口出现，且不在录音
+    // 不在录音 → 微信持续活跃 3 秒才启动（防误触发）
+    if (!wechatActive || m_isRecording) { m_findWechatRetries = 0; return; }
     m_findWechatRetries++;
-    if (m_findWechatRetries > 10) return;  // 10秒未找到 → 放弃
+    if (m_findWechatRetries < 3) return;
 
     int pid = FindWeChatPid();
-    if (pid == 0) return;  // 会话列表还没刷新出微信 → 下次重试
+    if (pid == 0) { m_findWechatRetries = 0; return; }
 
-    // 找到微信 PID → 自动开始
     m_autoRecording = true;
     m_findWechatRetries = 0;
-
-    // 先将选中设为微信
     m_sessionList.SelectByProcessName(L"WeChat.exe");
     m_sessionList.SelectByProcessName(L"Weixin.exe");
-
     OnStart();
 }
 
