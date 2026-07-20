@@ -626,37 +626,21 @@ void MainWindow::ScanRecordingHistory()
 }
 
 // ---- 微信自动录音 ----
-
-// 递归检查窗口及其子窗口是否匹配微信通话窗口类名
-static bool CheckWindowForWeChatCall(HWND hWnd)
-{
-    WCHAR cls[64];
-    if (GetClassNameW(hWnd, cls, 64))
-    {
-        if (_wcsicmp(cls, L"ILinkAudioWnd") == 0 ||
-            _wcsicmp(cls, L"AudioWnd") == 0 ||
-            _wcsicmp(cls, L"ILinkVoipTrayWnd") == 0)
-            return true;
-    }
-    // 递归检查子窗口
-    HWND child = FindWindowExW(hWnd, nullptr, nullptr, nullptr);
-    while (child)
-    {
-        if (CheckWindowForWeChatCall(child)) return true;
-        child = FindWindowExW(hWnd, child, nullptr, nullptr);
-    }
-    return false;
-}
+// 实现直接复刻 WeChatRecorder.py: EnumWindows + GetClassNameW
 
 bool MainWindow::IsWeChatInCall()
 {
-    // 1. 搜 message-only 窗口（WeChat 通话窗口通常是 HWND_MESSAGE 子窗口）
-    for (auto* cls : { L"ILinkAudioWnd", L"AudioWnd", L"ILinkVoipTrayWnd" })
-        if (FindWindowExW(HWND_MESSAGE, nullptr, nullptr, cls)) return true;
-    // 2. 搜普通顶层窗口 + 递归子窗口
     bool found = false;
     EnumWindows([](HWND hWnd, LPARAM lp) -> BOOL {
-        if (CheckWindowForWeChatCall(hWnd)) { *(bool*)lp = true; return FALSE; }
+        WCHAR cls[64] = {};
+        GetClassNameW(hWnd, cls, 64);
+        if (_wcsicmp(cls, L"ILinkAudioWnd") == 0 ||
+            _wcsicmp(cls, L"AudioWnd") == 0 ||
+            _wcsicmp(cls, L"ILinkVoipTrayWnd") == 0)
+        {
+            *(bool*)lp = true;
+            return FALSE;
+        }
         return TRUE;
     }, (LPARAM)&found);
     return found;
