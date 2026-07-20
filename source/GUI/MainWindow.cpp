@@ -3,6 +3,7 @@
 #include "Logger.h"
 #include <CommCtrl.h>
 #include <shellapi.h>
+#include <audiopolicy.h>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
@@ -163,6 +164,10 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
 
         LoadSettings();
         SendMessage(m_hAutoCheck, BM_SETCHECK, m_autoRecord ? BST_CHECKED : BST_UNCHECKED, 0);
+
+        // 注册音频会话变化通知（事件驱动，不用等1秒）
+        RegisterSessionNotification(m_hWnd, WM_USER_SESSION_CHANGED);
+
         AddTrayIcon();
         ShowIdleState();
         OnRefresh();
@@ -277,6 +282,12 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             ShowWindow(m_hWnd, SW_SHOW);
         return 0;
 
+    case WM_USER_SESSION_CHANGED:
+        // 音频会话变化 → 释放 COM 引用（win-capture-audio 模式）→ 刷新列表
+        if (wp) reinterpret_cast<IAudioSessionControl*>(wp)->Release();
+        m_sessionList.Refresh();
+        return 0;
+
     case WM_USER_RECORDING_STOPPED:
     {
         KillTimer(m_hWnd, 1);
@@ -313,6 +324,7 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         return 0;
 
     case WM_DESTROY:
+        UnregisterSessionNotification();
         RemoveTrayIcon();
         PostQuitMessage(0);
         return 0;
@@ -681,6 +693,21 @@ void MainWindow::CheckAutoRecord()
             }
         }
         else { m_noCallWindowCount = 0; }
+
+        // 静音检测：双方持续无声 > 60秒 → 自动停止（仅自动录音）
+        CaptureStatus st = m_engine.GetStatus();
+        if (st.systemLevel == 0 && st.micLevel == 0)
+        {
+            m_silenceSeconds++;
+            if (m_silenceSeconds >= 60)
+            {
+                Logger::Log(L"微信自动录音: 双方持续静音60秒，自动停止");
+                OnStop();
+                m_autoRecording = false;
+                m_silenceSeconds = 0;
+            }
+        }
+        else { m_silenceSeconds = 0; }
         return;
     }
 

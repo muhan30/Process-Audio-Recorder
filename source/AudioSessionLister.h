@@ -22,3 +22,8 @@ struct AudioSessionInfo
 // 枚举默认播放设备上的所有音频会话，正在发声的排前面
 // 调用前须已完成 COM 初始化（CoInitializeEx）
 HRESULT ListAudioSessions(std::vector<AudioSessionInfo>& sessions);
+
+// 注册会话变化通知（IAudioSessionNotification 事件驱动）
+// hWnd 收到 wParam==msg 时表示有新会话出现/旧会话过期，应刷新列表
+HRESULT RegisterSessionNotification(HWND hWnd, UINT msg);
+void UnregisterSessionNotification();

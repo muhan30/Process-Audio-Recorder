@@ -1,13 +1,16 @@
 #include "AudioSessionLister.h"
 
 #include <mmdeviceapi.h>   // IMMDeviceEnumerator
-#include <audiopolicy.h>   // IAudioSessionManager2 / IAudioSessionControl2
+#include <audiopolicy.h>   // IAudioSessionManager2 / IAudioSessionControl2 / IAudioSessionNotification
 #include <endpointvolume.h>// IAudioMeterInformation
 #include <algorithm>
 
 #include <wil/com.h>
 #include <wil/resource.h>
 #include <wil/result.h>
+#include <wrl/implements.h>
+
+using namespace Microsoft::WRL;
 
 // 由 PID 取进程 exe 名（失败返回空串）
 static std::wstring GetProcessNameByPid(DWORD pid)
@@ -99,4 +102,52 @@ HRESULT ListAudioSessions(std::vector<AudioSessionInfo>& sessions)
             return a.isActive > b.isActive;
         });
     return S_OK;
+}
+
+// ---- IAudioSessionNotification 事件驱动（参考 win-capture-audio session-monitor） ----
+
+class SessionNotifier
+    : public RuntimeClass<RuntimeClassFlags<ClassicCom>, FtmBase, IAudioSessionNotification>
+{
+    HWND m_hWnd = nullptr;
+    UINT m_msg = 0;
+public:
+    SessionNotifier(HWND hWnd, UINT msg) : m_hWnd(hWnd), m_msg(msg) {}
+
+    STDMETHOD(OnSessionCreated)(IAudioSessionControl* session) override
+    {
+        session->AddRef();  // win-capture-audio 做法：AddRef 后把指针抛给消息处理方
+        PostMessageW(m_hWnd, m_msg, reinterpret_cast<WPARAM>(session), 0);
+        return S_OK;
+    }
+};
+
+static wil::com_ptr<SessionNotifier> g_sessionNotifier;
+static wil::com_ptr<IAudioSessionManager2> g_sessionManager2;
+
+HRESULT RegisterSessionNotification(HWND hWnd, UINT msg)
+{
+    // 1. 取默认播放设备
+    wil::com_ptr_nothrow<IMMDeviceEnumerator> enumerator;
+    RETURN_IF_FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+        IID_PPV_ARGS(&enumerator)));
+    wil::com_ptr_nothrow<IMMDevice> device;
+    RETURN_IF_FAILED(enumerator->GetDefaultAudioEndpoint(eRender, eConsole, &device));
+
+    // 2. 激活会话管理器
+    RETURN_IF_FAILED(device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
+        g_sessionManager2.put_void()));
+
+    // 3. 注册通知
+    g_sessionNotifier = Make<SessionNotifier>(hWnd, msg);
+    RETURN_IF_FAILED(g_sessionManager2->RegisterSessionNotification(g_sessionNotifier.get()));
+    return S_OK;
+}
+
+void UnregisterSessionNotification()
+{
+    if (g_sessionManager2 && g_sessionNotifier)
+        g_sessionManager2->UnregisterSessionNotification(g_sessionNotifier.get());
+    g_sessionNotifier.reset();
+    g_sessionManager2.reset();
 }

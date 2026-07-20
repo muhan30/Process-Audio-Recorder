@@ -13,6 +13,7 @@
 
 #define WM_USER_RECORDING_STOPPED (WM_USER + 1)
 #define WM_USER_TRAYICON        (WM_USER + 2)
+#define WM_USER_SESSION_CHANGED (WM_USER + 3)  // 音频会话变化通知
 
 #define IDM_TRAY_SHOW   3001
 #define IDM_TRAY_STOP   3002
@@ -73,6 +74,7 @@ private:
     bool IsWeChatInCall();            // EnumWindows 检测通话窗口
     int FindWeChatPid();              // 从会话列表找微信 PID
     void CheckAutoRecord();           // 定时器回调：自动启停主逻辑
+    int m_silenceSeconds = 0;         // 连续静音秒数（双方无声）
 
     // 窗口过程
     static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp);
