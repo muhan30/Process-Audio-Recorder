@@ -69,9 +69,14 @@ int wmain(int argc, wchar_t* argv[])
         outPath = (dot != std::wstring::npos) ? in.substr(0, dot) + L".aac" : in + L".aac";
     }
 
-    // 4. Sink writer for AAC output (.aac extension automatically selects ADTS container)
+    // 4. Sink writer for AAC ADTS output
+    IMFAttributes* sinkAttrs = nullptr;
+    MFCreateAttributes(&sinkAttrs, 1);
+    sinkAttrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_ADTS);
+
     IMFSinkWriter* writer = nullptr;
-    hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, nullptr, &writer);
+    hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, sinkAttrs, &writer);
+    sinkAttrs->Release();
     if (FAILED(hr)) {
         wprintf(L"[ERROR] SinkWriter create: 0x%08X\n", hr);
         reader->Release(); MFShutdown(); CoUninitialize(); return 1;
@@ -94,8 +99,7 @@ int wmain(int argc, wchar_t* argv[])
         writer->Release(); reader->Release(); MFShutdown(); CoUninitialize(); return 1;
     }
 
-    // Input type (PCM) — BlockAlign and AvgBytesPerSec required
-    DWORD blockAlign = channels * 2;
+    // Input type (PCM) — only set minimal required attrs, let MF negotiate the rest
     IMFMediaType* inType = nullptr;
     MFCreateMediaType(&inType);
     inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
@@ -103,8 +107,6 @@ int wmain(int argc, wchar_t* argv[])
     inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
     inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
     inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-    inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, blockAlign);
-    inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, sampleRate * blockAlign);
     hr = writer->SetInputMediaType(outIdx, inType, nullptr);
     inType->Release();
     if (FAILED(hr)) {
