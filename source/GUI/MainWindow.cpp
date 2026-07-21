@@ -800,7 +800,8 @@ void MainWindow::ConvertToAac(const std::wstring& m4aPath)
     hr = writer->AddStream(outType, &outIdx);
     outType->Release();
 
-    // Input type (PCM)
+    // Input type (PCM) — 必须设 BlockAlign 和 AvgBytesPerSec，否则编码器切乱字节
+    DWORD blockAlign = channels * 2; // 16bit stereo = 4 bytes
     IMFMediaType* inType = nullptr;
     MFCreateMediaType(&inType);
     inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
@@ -808,6 +809,8 @@ void MainWindow::ConvertToAac(const std::wstring& m4aPath)
     inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
     inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
     inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, blockAlign);
+    inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, sampleRate * blockAlign);
     writer->SetInputMediaType(outIdx, inType, nullptr);
     inType->Release();
 
