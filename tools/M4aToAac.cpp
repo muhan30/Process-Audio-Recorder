@@ -16,7 +16,7 @@ static void WriteADTS(FILE* f, int frameSize, int profile, int srIdx, int channe
     int flen = frameSize + 7;
     BYTE h[7] = {};
     h[0] = 0xFF; h[1] = 0xF1;
-    h[2] = (BYTE)(((profile - 1) << 6) | (srIdx << 2) | ((channels >> 2) & 1));
+    h[2] = (BYTE)((profile << 6) | (srIdx << 2) | ((channels >> 2) & 1));
     h[3] = (BYTE)(((channels & 3) << 6) | ((flen >> 11) & 3));
     h[4] = (BYTE)((flen >> 3) & 0xFF);
     h[5] = (BYTE)(((flen & 7) << 5) | 0x1F);
