@@ -69,14 +69,9 @@ int wmain(int argc, wchar_t* argv[])
         outPath = (dot != std::wstring::npos) ? in.substr(0, dot) + L".aac" : in + L".aac";
     }
 
-    // 4. Sink writer for AAC ADTS output
-    IMFAttributes* sinkAttrs = nullptr;
-    MFCreateAttributes(&sinkAttrs, 1);
-    sinkAttrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_ADTS);
-
+    // 4. Sink writer for AAC output (.aac extension automatically selects ADTS container)
     IMFSinkWriter* writer = nullptr;
-    hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, sinkAttrs, &writer);
-    sinkAttrs->Release();
+    hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, nullptr, &writer);
     if (FAILED(hr)) {
         wprintf(L"[ERROR] SinkWriter create: 0x%08X\n", hr);
         reader->Release(); MFShutdown(); CoUninitialize(); return 1;
