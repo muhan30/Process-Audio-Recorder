@@ -65,7 +65,6 @@ private:
     HWND m_hHistoryList = nullptr;
     std::vector<std::wstring> m_historyPaths;  // item index → full path
     void ScanRecordingHistory();
-    void ConvertToAac(const std::wstring& m4aPath);  // M4A→AAC 转换
 
     // 微信自动录音
     bool m_autoRecord = true;         // 复选框状态 / INI: AutoRecord
