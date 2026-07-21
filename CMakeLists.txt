@@ -62,12 +62,7 @@ target_link_libraries(ProcessAudioRecorderGUI
     shell32
 )
 
-# ---- M4A -> AAC converter ----
+# ---- M4A -> AAC remuxer (sync-word detection, no external deps) ----
 add_executable(M4aToAac
     tools/M4aToAac.cpp
-)
-target_link_libraries(M4aToAac
-    mfplat
-    mfuuid
-    mfreadwrite
 )
