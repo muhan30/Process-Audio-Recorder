@@ -14,6 +14,7 @@
 #define WM_USER_RECORDING_STOPPED (WM_USER + 1)
 #define WM_USER_TRAYICON        (WM_USER + 2)
 #define WM_USER_SESSION_CHANGED (WM_USER + 3)  // 音频会话变化通知
+#define WM_USER_CONVERT_FAILED  (WM_USER + 4)   // AAC 转换失败通知
 
 #define IDM_TRAY_SHOW   3001
 #define IDM_TRAY_STOP   3002
