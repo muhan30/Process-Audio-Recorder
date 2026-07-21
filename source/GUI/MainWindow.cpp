@@ -3,7 +3,11 @@
 #include "Logger.h"
 #include <CommCtrl.h>
 #include <shellapi.h>
+#include <windowsx.h>
 #include <audiopolicy.h>
+#include <mfapi.h>
+#include <mfidl.h>
+#include <mfreadwrite.h>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
@@ -186,6 +190,26 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         }
         return 0;
 
+    case WM_CONTEXTMENU:
+        if ((HWND)wp == m_hHistoryList)
+        {
+            // 在右击位置选中该项
+            LVHITTESTINFO ht = {};
+            POINT pt = { GET_X_LPARAM(lp), GET_Y_LPARAM(lp) };
+            ht.pt = pt;
+            ScreenToClient(m_hHistoryList, &ht.pt);
+            int idx = ListView_HitTest(m_hHistoryList, &ht);
+            if (idx >= 0 && idx < (int)m_historyPaths.size())
+            {
+                ListView_SetItemState(m_hHistoryList, idx, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+                HMENU menu = CreatePopupMenu();
+                AppendMenu(menu, MF_STRING, 4001, L"转为 AAC");
+                TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, m_hWnd, nullptr);
+                DestroyMenu(menu);
+            }
+        }
+        return 0;
+
     case WM_NOTIFY:
     {
         auto* nmh = reinterpret_cast<LPNMHDR>(lp);
@@ -249,6 +273,13 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             if (m_isRecording) OnStop(); break;
         case IDM_TRAY_EXIT:
             if (OnExit()) { DestroyWindow(m_hWnd); } break;
+        case 4001: // 转为 AAC
+            {
+                int idx = ListView_GetNextItem(m_hHistoryList, -1, LVNI_SELECTED);
+                if (idx >= 0 && idx < (int)m_historyPaths.size())
+                    ConvertToAac(m_historyPaths[idx]);
+            }
+            break;
         }
         return 0;
     }
@@ -711,6 +742,110 @@ void MainWindow::CheckAutoRecord()
     m_sessionList.SelectByProcessName(L"WeChat.exe");
     m_sessionList.SelectByProcessName(L"Weixin.exe");
     OnStart();
+}
+
+// ---- AAC 转换 ----
+void MainWindow::ConvertToAac(const std::wstring& m4aPath)
+{
+    // 生成输出路径
+    auto dot = m4aPath.rfind(L'.');
+    std::wstring outPath = (dot != std::wstring::npos) ? m4aPath.substr(0, dot) + L".aac" : m4aPath + L".aac";
+
+    // 已存在 → 确认覆盖
+    if (GetFileAttributesW(outPath.c_str()) != INVALID_FILE_ATTRIBUTES)
+    {
+        WCHAR msg[512];
+        wsprintfW(msg, L"文件已存在:\n%s\n\n覆盖？", outPath.c_str());
+        if (MessageBox(m_hWnd, msg, L"转为 AAC", MB_YESNO | MB_ICONQUESTION) != IDYES)
+            return;
+    }
+
+    // Source reader
+    IMFSourceReader* reader = nullptr;
+    HRESULT hr = MFCreateSourceReaderFromURL(m4aPath.c_str(), nullptr, &reader);
+    if (FAILED(hr)) {
+        MessageBox(m_hWnd, L"无法打开 M4A 文件。", L"转换失败", MB_ICONERROR);
+        return;
+    }
+
+    // Get audio info
+    UINT32 sampleRate = 44100, channels = 2;
+    IMFMediaType* pcmType = nullptr;
+    if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pcmType)) && pcmType) {
+        pcmType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
+        pcmType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
+        pcmType->Release();
+    }
+
+    // Sink writer (AAC ADTS)
+    IMFAttributes* sinkAttrs = nullptr;
+    MFCreateAttributes(&sinkAttrs, 1);
+    sinkAttrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_ADTS);
+
+    IMFSinkWriter* writer = nullptr;
+    hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, sinkAttrs, &writer);
+    sinkAttrs->Release();
+    if (FAILED(hr)) { reader->Release(); MessageBox(m_hWnd, L"无法创建输出文件。", L"转换失败", MB_ICONERROR); return; }
+
+    // Output stream (AAC)
+    IMFMediaType* outType = nullptr;
+    MFCreateMediaType(&outType);
+    outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    outType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
+    outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
+    outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
+    outType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16000);
+    DWORD outIdx = 0;
+    hr = writer->AddStream(outType, &outIdx);
+    outType->Release();
+
+    // Input type (PCM)
+    IMFMediaType* inType = nullptr;
+    MFCreateMediaType(&inType);
+    inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+    inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+    inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
+    inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
+    inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+    writer->SetInputMediaType(outIdx, inType, nullptr);
+    inType->Release();
+
+    if (FAILED(writer->BeginWriting())) {
+        writer->Release(); reader->Release();
+        MessageBox(m_hWnd, L"编码器初始化失败。", L"转换失败", MB_ICONERROR); return;
+    }
+
+    // Pipe: Read PCM → Write AAC
+    DWORD streamIdx, flags;
+    LONGLONG ts, rt = 0;
+    for (;;) {
+        IMFSample* sample = nullptr;
+        hr = reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &streamIdx, &flags, &ts, &sample);
+        if (FAILED(hr)) break;
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) { if (sample) sample->Release(); break; }
+        if (!sample) continue;
+
+        DWORD len = 0;
+        if (FAILED(sample->GetTotalLength(&len)) || len == 0) { sample->Release(); continue; }
+        sample->SetSampleTime(rt);
+        sample->SetSampleDuration((LONGLONG)len * 10000000LL / (sampleRate * channels * 2));
+        rt += (LONGLONG)len * 10000000LL / (sampleRate * channels * 2);
+        writer->WriteSample(outIdx, sample);
+        sample->Release();
+    }
+
+    hr = writer->Finalize();
+    writer->Release();
+    reader->Release();
+
+    if (SUCCEEDED(hr)) {
+        ScanRecordingHistory();
+        MessageBox(m_hWnd, L"转换完成。", L"OK", MB_OK);
+    } else {
+        DeleteFileW(outPath.c_str());
+        MessageBox(m_hWnd, L"转换失败，请重试。", L"错误", MB_ICONERROR);
+    }
 }
 
 // ---- 托盘 ----
