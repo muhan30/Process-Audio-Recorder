@@ -751,7 +751,6 @@ void MainWindow::ConvertToAac(const std::wstring& m4aPath)
     auto dot = m4aPath.rfind(L'.');
     std::wstring outPath = (dot != std::wstring::npos) ? m4aPath.substr(0, dot) + L".aac" : m4aPath + L".aac";
 
-    // 已存在 → 确认覆盖
     if (GetFileAttributesW(outPath.c_str()) != INVALID_FILE_ATTRIBUTES)
     {
         WCHAR msg[512];
@@ -760,94 +759,91 @@ void MainWindow::ConvertToAac(const std::wstring& m4aPath)
             return;
     }
 
-    // Source reader
+    // MF 可能已被录音 Finalize 关闭，需重初始化。用 goto 保证 MFShutdown 必调用。
+    MFStartup(MF_VERSION);
+    HRESULT hr;
     IMFSourceReader* reader = nullptr;
-    HRESULT hr = MFCreateSourceReaderFromURL(m4aPath.c_str(), nullptr, &reader);
-    if (FAILED(hr)) {
-        MessageBox(m_hWnd, L"无法打开 M4A 文件。", L"转换失败", MB_ICONERROR);
-        return;
-    }
-
-    // Get audio info
-    UINT32 sampleRate = 44100, channels = 2;
-    IMFMediaType* pcmType = nullptr;
-    if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pcmType)) && pcmType) {
-        pcmType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
-        pcmType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
-        pcmType->Release();
-    }
-
-    // Sink writer (AAC ADTS)
-    IMFAttributes* sinkAttrs = nullptr;
-    MFCreateAttributes(&sinkAttrs, 1);
-    sinkAttrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_ADTS);
-
     IMFSinkWriter* writer = nullptr;
-    hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, sinkAttrs, &writer);
-    sinkAttrs->Release();
-    if (FAILED(hr)) { reader->Release(); MessageBox(m_hWnd, L"无法创建输出文件。", L"转换失败", MB_ICONERROR); return; }
 
-    // Output stream (AAC)
-    IMFMediaType* outType = nullptr;
-    MFCreateMediaType(&outType);
-    outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    outType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
-    outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
-    outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
-    outType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-    outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16000);
-    DWORD outIdx = 0;
-    hr = writer->AddStream(outType, &outIdx);
-    outType->Release();
+    hr = MFCreateSourceReaderFromURL(m4aPath.c_str(), nullptr, &reader);
+    if (FAILED(hr)) goto done;
 
-    // Input type (PCM) — 必须设 BlockAlign 和 AvgBytesPerSec，否则编码器切乱字节
-    DWORD blockAlign = channels * 2; // 16bit stereo = 4 bytes
-    IMFMediaType* inType = nullptr;
-    MFCreateMediaType(&inType);
-    inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-    inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-    inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
-    inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
-    inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-    inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, blockAlign);
-    inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, sampleRate * blockAlign);
-    writer->SetInputMediaType(outIdx, inType, nullptr);
-    inType->Release();
+    {
+        UINT32 sampleRate = 44100, channels = 2;
+        IMFMediaType* pcmType = nullptr;
+        if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pcmType)) && pcmType) {
+            pcmType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sampleRate);
+            pcmType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &channels);
+            pcmType->Release();
+        }
 
-    if (FAILED(writer->BeginWriting())) {
-        writer->Release(); reader->Release();
-        MessageBox(m_hWnd, L"编码器初始化失败。", L"转换失败", MB_ICONERROR); return;
+        IMFAttributes* sinkAttrs = nullptr;
+        MFCreateAttributes(&sinkAttrs, 1);
+        sinkAttrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_ADTS);
+        hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, sinkAttrs, &writer);
+        sinkAttrs->Release();
+        if (FAILED(hr)) goto done;
+
+        IMFMediaType* outType = nullptr;
+        MFCreateMediaType(&outType);
+        outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+        outType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
+        outType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
+        outType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
+        outType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+        outType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16000);
+        DWORD outIdx = 0;
+        hr = writer->AddStream(outType, &outIdx);
+        outType->Release();
+        if (FAILED(hr)) goto done;
+
+        DWORD blockAlign = channels * 2;
+        IMFMediaType* inType = nullptr;
+        MFCreateMediaType(&inType);
+        inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+        inType->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
+        inType->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sampleRate);
+        inType->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, channels);
+        inType->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
+        inType->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, blockAlign);
+        inType->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, sampleRate * blockAlign);
+        hr = writer->SetInputMediaType(outIdx, inType, nullptr);
+        inType->Release();
+        if (FAILED(hr)) goto done;
+
+        hr = writer->BeginWriting();
+        if (FAILED(hr)) goto done;
+
+        DWORD streamIdx, flags;
+        LONGLONG ts, rt = 0;
+        for (;;) {
+            IMFSample* sample = nullptr;
+            hr = reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &streamIdx, &flags, &ts, &sample);
+            if (FAILED(hr)) break;
+            if (flags & MF_SOURCE_READERF_ENDOFSTREAM) { if (sample) sample->Release(); break; }
+            if (!sample) continue;
+            DWORD len = 0;
+            if (FAILED(sample->GetTotalLength(&len)) || len == 0) { sample->Release(); continue; }
+            sample->SetSampleTime(rt);
+            sample->SetSampleDuration((LONGLONG)len * 10000000LL / (sampleRate * channels * 2));
+            rt += (LONGLONG)len * 10000000LL / (sampleRate * channels * 2);
+            writer->WriteSample(outIdx, sample);
+            sample->Release();
+        }
+        hr = writer->Finalize();
     }
 
-    // Pipe: Read PCM → Write AAC
-    DWORD streamIdx, flags;
-    LONGLONG ts, rt = 0;
-    for (;;) {
-        IMFSample* sample = nullptr;
-        hr = reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &streamIdx, &flags, &ts, &sample);
-        if (FAILED(hr)) break;
-        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) { if (sample) sample->Release(); break; }
-        if (!sample) continue;
-
-        DWORD len = 0;
-        if (FAILED(sample->GetTotalLength(&len)) || len == 0) { sample->Release(); continue; }
-        sample->SetSampleTime(rt);
-        sample->SetSampleDuration((LONGLONG)len * 10000000LL / (sampleRate * channels * 2));
-        rt += (LONGLONG)len * 10000000LL / (sampleRate * channels * 2);
-        writer->WriteSample(outIdx, sample);
-        sample->Release();
-    }
-
-    hr = writer->Finalize();
-    writer->Release();
-    reader->Release();
+done:
+    if (writer) writer->Release();
+    if (reader) reader->Release();
+    MFShutdown();
 
     if (SUCCEEDED(hr)) {
         ScanRecordingHistory();
         MessageBox(m_hWnd, L"转换完成。", L"OK", MB_OK);
     } else {
         DeleteFileW(outPath.c_str());
-        MessageBox(m_hWnd, L"转换失败，请重试。", L"错误", MB_ICONERROR);
+        MessageBox(m_hWnd, L"无法打开 M4A 文件，请确认文件存在且未被占用。", L"转换失败", MB_ICONERROR);
     }
 }
 
