@@ -310,6 +310,11 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
             ShowWindow(m_hWnd, SW_SHOW);
         return 0;
 
+    case WM_USER + 5:
+        if (wp == 0) ScanRecordingHistory();  // 转换成功, 刷新历史
+        else MessageBox(m_hWnd, L"AAC 转换失败，请重试。", L"转换失败", MB_ICONERROR);
+        return 0;
+
     case WM_USER_SESSION_CHANGED:
         // 音频会话变化 → 释放 COM 引用（win-capture-audio 模式）→ 刷新列表
         if (wp) reinterpret_cast<IAudioSessionControl*>(wp)->Release();
@@ -756,38 +761,31 @@ void MainWindow::ConvertToAac(const std::wstring& m4aPath)
             return;
     }
 
-    // 查找 M4aToAac.exe：exe 同目录
-    WCHAR exeDir[MAX_PATH];
-    GetModuleFileName(nullptr, exeDir, MAX_PATH);
-    WCHAR* lastSlash = wcsrchr(exeDir, L'\\');
-    if (lastSlash) *lastSlash = L'\0';
-    std::wstring toolPath = std::wstring(exeDir) + L"\\M4aToAac.exe";
+    // 后台线程异步转换，不卡 UI
+    HWND hWnd = m_hWnd;
+    std::wstring src = m4aPath, dst = outPath;
+    std::thread([hWnd, src, dst]() {
+        WCHAR exeDir[MAX_PATH];
+        GetModuleFileName(nullptr, exeDir, MAX_PATH);
+        WCHAR* lastSlash = wcsrchr(exeDir, L'\\');
+        if (lastSlash) *lastSlash = L'\0';
+        std::wstring toolPath = std::wstring(exeDir) + L"\\M4aToAac.exe";
+        std::wstring cmdLine = L"\"" + toolPath + L"\" \"" + src + L"\" \"" + dst + L"\"";
 
-    std::wstring cmdLine = L"\"" + toolPath + L"\" \"" + m4aPath + L"\" \"" + outPath + L"\"";
-
-    STARTUPINFOW si = { sizeof(si) };
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    PROCESS_INFORMATION pi = {};
-
-    if (CreateProcessW(nullptr, cmdLine.data(), nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
-    {
-        WaitForSingleObject(pi.hProcess, INFINITE);
-        DWORD exitCode = 0;
-        GetExitCodeProcess(pi.hProcess, &exitCode);
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-
-        if (exitCode == 0)
-            ScanRecordingHistory();
-        else
-            MessageBox(m_hWnd, L"AAC 转换失败，请重试。", L"转换失败", MB_ICONERROR);
-    }
-    else
-    {
-        MessageBox(m_hWnd, L"找不到 M4aToAac.exe，请确认文件完整。", L"转换失败", MB_ICONERROR);
-    }
+        STARTUPINFOW si = { sizeof(si) };
+        si.dwFlags = STARTF_USESHOWWINDOW; si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi = {};
+        BOOL ok = CreateProcessW(nullptr, cmdLine.data(), nullptr, nullptr, FALSE,
+                                 CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+        if (ok) {
+            WaitForSingleObject(pi.hProcess, INFINITE);
+            DWORD ec = 0; GetExitCodeProcess(pi.hProcess, &ec);
+            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            PostMessage(hWnd, WM_USER + 5, ec, 0);
+        } else {
+            PostMessage(hWnd, WM_USER + 5, (WPARAM)-1, 0);
+        }
+    }).detach();
 }
 
 // ---- 托盘 ----
