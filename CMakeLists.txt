@@ -62,7 +62,7 @@ target_link_libraries(ProcessAudioRecorderGUI
     shell32
 )
 
-# ---- M4A -> AAC remuxer ----
+# ---- M4A -> AAC converter ----
 add_executable(M4aToAac
     tools/M4aToAac.cpp
 )
