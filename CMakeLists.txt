@@ -61,3 +61,13 @@ target_link_libraries(ProcessAudioRecorderGUI
     comctl32
     shell32
 )
+
+# ---- M4A -> AAC remuxer ----
+add_executable(M4aToAac
+    tools/M4aToAac.cpp
+)
+target_link_libraries(M4aToAac
+    mfplat
+    mfuuid
+    mfreadwrite
+)
