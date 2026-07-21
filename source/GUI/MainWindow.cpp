@@ -5,9 +5,6 @@
 #include <shellapi.h>
 #include <windowsx.h>
 #include <audiopolicy.h>
-#include <mfapi.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
@@ -317,18 +314,6 @@ LRESULT MainWindow::HandleMessage(UINT msg, WPARAM wp, LPARAM lp)
         // 音频会话变化 → 释放 COM 引用（win-capture-audio 模式）→ 刷新列表
         if (wp) reinterpret_cast<IAudioSessionControl*>(wp)->Release();
         m_sessionList.Refresh();
-        return 0;
-
-    case WM_USER + 5:
-        ScanRecordingHistory();
-        return 0;
-
-    case WM_USER_CONVERT_FAILED:
-        {
-            WCHAR buf[128];
-            wsprintfW(buf, L"AAC 转换失败 (0x%08X)", (UINT)wp);
-            MessageBox(m_hWnd, buf, L"转换失败", MB_ICONERROR);
-        }
         return 0;
 
     case WM_USER_RECORDING_STOPPED:
@@ -771,91 +756,38 @@ void MainWindow::ConvertToAac(const std::wstring& m4aPath)
             return;
     }
 
-    // 后台线程执行转换（避免主线程消息泵阻塞导致 MF 编码器异常）
-    HWND hWnd = m_hWnd;
-    std::wstring srcPath = m4aPath;
-    auto f = [hWnd, srcPath, outPath]() {
-        CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        MFStartup(MF_VERSION);
+    // 查找 M4aToAac.exe：exe 同目录
+    WCHAR exeDir[MAX_PATH];
+    GetModuleFileName(nullptr, exeDir, MAX_PATH);
+    WCHAR* lastSlash = wcsrchr(exeDir, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
+    std::wstring toolPath = std::wstring(exeDir) + L"\\M4aToAac.exe";
 
-        HRESULT hr;
-        IMFSourceReader* reader = nullptr;
-        IMFSinkWriter* writer = nullptr;
+    std::wstring cmdLine = L"\"" + toolPath + L"\" \"" + m4aPath + L"\" \"" + outPath + L"\"";
 
-        hr = MFCreateSourceReaderFromURL(srcPath.c_str(), nullptr, &reader);
-        if (FAILED(hr)) goto done;
+    STARTUPINFOW si = { sizeof(si) };
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi = {};
 
-        {
-            UINT32 sr = 44100, ch = 2;
-            IMFMediaType* pcmType = nullptr;
-            if (SUCCEEDED(reader->GetCurrentMediaType(MF_SOURCE_READER_FIRST_AUDIO_STREAM, &pcmType)) && pcmType) {
-                pcmType->GetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, &sr);
-                pcmType->GetUINT32(MF_MT_AUDIO_NUM_CHANNELS, &ch);
-                pcmType->Release();
-            }
+    if (CreateProcessW(nullptr, cmdLine.data(), nullptr, nullptr, FALSE,
+                        CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi))
+    {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        DWORD exitCode = 0;
+        GetExitCodeProcess(pi.hProcess, &exitCode);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
 
-            IMFAttributes* attrs = nullptr;
-            MFCreateAttributes(&attrs, 1);
-            attrs->SetGUID(MF_TRANSCODE_CONTAINERTYPE, MFTranscodeContainerType_ADTS);
-            hr = MFCreateSinkWriterFromURL(outPath.c_str(), nullptr, attrs, &writer);
-            attrs->Release();
-            if (FAILED(hr)) goto done;
-
-            IMFMediaType* ot = nullptr; MFCreateMediaType(&ot);
-            ot->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-            ot->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_AAC);
-            ot->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sr);
-            ot->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, ch);
-            ot->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-            ot->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, 16000);
-            DWORD oi = 0; hr = writer->AddStream(ot, &oi); ot->Release();
-            if (FAILED(hr)) goto done;
-
-            DWORD ba = ch * 2;
-            IMFMediaType* it = nullptr; MFCreateMediaType(&it);
-            it->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-            it->SetGUID(MF_MT_SUBTYPE, MFAudioFormat_PCM);
-            it->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, sr);
-            it->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, ch);
-            it->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, 16);
-            it->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, ba);
-            it->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, sr * ba);
-            hr = writer->SetInputMediaType(oi, it, nullptr); it->Release();
-            if (FAILED(hr)) goto done;
-
-            hr = writer->BeginWriting();
-            if (FAILED(hr)) goto done;
-
-            DWORD si, fl; LONGLONG ts, rt = 0;
-            for (;;) {
-                IMFSample* s = nullptr;
-                hr = reader->ReadSample(MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0, &si, &fl, &ts, &s);
-                if (FAILED(hr)) break;
-                if (fl & MF_SOURCE_READERF_ENDOFSTREAM) { if (s) s->Release(); break; }
-                if (!s) continue;
-                DWORD len = 0;
-                if (FAILED(s->GetTotalLength(&len)) || len == 0) { s->Release(); continue; }
-                s->SetSampleTime(rt);
-                s->SetSampleDuration((LONGLONG)len * 10000000LL / (sr * ch * 2));
-                rt += (LONGLONG)len * 10000000LL / (sr * ch * 2);
-                writer->WriteSample(oi, s);
-                s->Release();
-            }
-            hr = writer->Finalize();
-        }
-    done:
-        if (writer) writer->Release();
-        if (reader) reader->Release();
-        MFShutdown();
-        CoUninitialize();
-
-        if (SUCCEEDED(hr))
-            PostMessage(hWnd, WM_USER + 5, 0, 0); // 刷新历史
+        if (exitCode == 0)
+            ScanRecordingHistory();
         else
-            PostMessage(hWnd, WM_USER_CONVERT_FAILED, (WPARAM)hr, 0);
-    };
-
-    std::thread(f).detach();
+            MessageBox(m_hWnd, L"AAC 转换失败，请重试。", L"转换失败", MB_ICONERROR);
+    }
+    else
+    {
+        MessageBox(m_hWnd, L"找不到 M4aToAac.exe，请确认文件完整。", L"转换失败", MB_ICONERROR);
+    }
 }
 
 // ---- 托盘 ----
